@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentic-assistant": {
+      "command": "npx",
+      "args": ["-y", "agentic-assistant", "mcp"]
+    }
+  }
+}
