@@ -42,6 +42,7 @@
 .agd-assistant__title { margin: 0; font-size: var(--agd-font-size-lg, 1.125rem); font-weight: 600; }
 .agd-assistant__log { flex: 1; overflow-y: auto; padding: var(--agd-space-4, 1rem); display: flex; flex-direction: column; gap: var(--agd-space-3, 0.75rem); }
 .agd-assistant__empty { color: var(--aa-muted); margin: 0; }
+/* .agd-assistant__user is a hook for host overrides. It has no style of its own. */
 .agd-assistant__msg { padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); }
 .agd-assistant__assistant { background: var(--aa-card-bg); }
 .agd-assistant__who { margin: 0 0 var(--agd-space-1, 0.25rem); font-size: var(--agd-font-size-sm, 0.875rem); font-weight: 600; color: var(--aa-muted); }

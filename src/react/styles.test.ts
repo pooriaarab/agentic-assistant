@@ -71,6 +71,10 @@ describe("panel styles", () => {
     ["edge", "hover-bg", 3],
     ["accent-hover", "bg", 3],
     ["warn-fg", "bg", 3],
+    ["warn-fg", "bg", 4.5],
+    ["muted", "warn-bg", 4.5],
+    ["accent", "warn-bg", 3],
+    ["accent-hover", "warn-bg", 3],
   ])("%s on %s is at least %s:1 in light, dark, and OS dark", (fg, bg, minimum) => {
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
       const variables = variablesFor(name);
