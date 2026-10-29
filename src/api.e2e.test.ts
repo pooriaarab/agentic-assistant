@@ -109,12 +109,12 @@ describe("sign-in", () => {
     expect(w.providers).toHaveLength(0);
   });
 
-  test("an Auth that throws, or returns a context of the wrong shape, is a 401", async () => {
+  test("an Auth that throws is a 503, and a context of the wrong shape is a 401", async () => {
     const registry = new ToolRegistry();
     const make = (authenticate: () => Promise<unknown>) =>
       createWorker({ auth: { authenticate } as never, registry, provider: () => new ScriptedProvider([]) });
     const request = () => new Request(`${base}/tools`);
-    expect((await make(async () => Promise.reject(new Error("db down"))).fetch(request())).status).toBe(401);
+    expect((await make(async () => Promise.reject(new Error("db down"))).fetch(request())).status).toBe(503);
     for (const context of [
       { principalId: "a", kind: "wizard", chain: [{ id: "a", kind: "human" }], scopes: [] },
       { principalId: "a", kind: "human", chain: [], scopes: [] },
