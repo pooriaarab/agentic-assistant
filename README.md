@@ -152,7 +152,7 @@ The assistant prints its answer on stdout. The answer starts with `Assistant (ma
 agentic-assistant mcp --tools https://notes.example.eu/mcp --scope notes:read --tool-scope notes:read --tool-risk safe --use-default-endpoint
 ```
 
-Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat`, with one argument, `message`. Each call starts a new conversation. The reply is JSON with `machineMade: true`, the answer, the stop reason, and the tool calls. A run that stops on a cap is an error result. The caps (`--max-turns`, `--max-cost`) apply to one call, and the server has no total limit, so set a limit in the client that calls it. The server stops when the client closes its input. A call that is still running is cancelled and dropped: the client gets no reply for it. The tool servers are closed. The server cannot ask a person, so a risky call runs only when you started the server with a matching `--approve-call`.
+Add this to an MCP client as a stdio server. Without `--api`, it offers one tool, `assistant_chat`, with one argument, `message`. Each call starts a new conversation. The reply is JSON with `machineMade: true`, the answer, the stop reason, and the tool calls. A run that stops on a cap is an error result. The caps (`--max-turns`, `--max-cost`) apply to one call, and the server has no total limit, so set a limit in the client that calls it. The server stops when the client closes its input. A call that is still running is cancelled and dropped: the client gets no reply for it. The tool servers are closed. The server cannot ask a person, so a risky call runs only when you started the server with a matching `--approve-call`.
 
 ### Tools and approvals from the CLI and MCP
 
