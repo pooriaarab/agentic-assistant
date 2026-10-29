@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
-import { FallbackProvider, OpenAICompatibleProvider, ToolRegistry, createPrincipal, runAssistant, type AssistantEvent, type ModelProvider, type ModelRequest } from "./index.js";
+import { FallbackProvider, OpenAICompatibleProvider, ToolRegistry, createPrincipal, runAssistant, type AssistantEvent, type ModelEvent, type ModelProvider, type ModelRequest } from "./index.js";
 import { runCli, type CliIo } from "./cli.js";
 import { ScriptedProvider } from "./testing.js";
 import { serveNotes } from "../test-fixtures/notes-http.mjs";
@@ -19,6 +19,7 @@ import { serveNotes } from "../test-fixtures/notes-http.mjs";
 // 10. The fallback spends past a token or cost cap: its budget is not cut by what the first ask used.
 // 11. A first ask that failed after it streamed is not counted.
 // 12. An empty --fallback-model is accepted.
+// 13. A bad token count from the first ask (negative, not whole) widens the room of the second.
 
 const message = (text: string) => [{ role: "user" as const, content: [{ type: "text" as const, text }] }];
 
@@ -133,7 +134,7 @@ describe("FallbackProvider", () => {
     const first = primary.requests[0]?.maxOutputTokens as number;
     expect(fallback.requests[0]?.maxOutputTokens).toBe(first - 60);
     // The pre-check counted the input of both asks, so the first room is cut too.
-    const single = new Named("solo", [{ text: "ok" }]);
+    const single = new Named("single-1", [{ text: "ok" }]);
     await run(single, { limits: { maxTotalTokens: 400 } });
     expect(first).toBeLessThan(single.requests[0]?.maxOutputTokens as number);
     expect(done(events)?.reason).toBe("end_turn");
@@ -169,6 +170,32 @@ describe("FallbackProvider", () => {
   test("a first ask that failed before it streamed anything costs nothing", async () => {
     const events = await run(new FallbackProvider(new Broken(), new Named("small-1", [{ text: "ok", usage: { inputTokens: 10, outputTokens: 5 } }])));
     expect(done(events)?.totals).toMatchObject({ inputTokens: 10, outputTokens: 5 });
+  });
+
+  test("a bad token count from the first ask stops the run, and the fallback is not asked", async () => {
+    for (const outputTokens of [-5000, 1.5, Number.NaN]) {
+      const primary = new Named("big-1", [{ text: "no", stopReason: "refusal", usage: { inputTokens: 10, outputTokens } }]);
+      const fallback = new Named("small-1", [{ text: "ok" }]);
+      const events = await run(new FallbackProvider(primary, fallback));
+      expect(done(events)?.reason, String(outputTokens)).toBe("provider_error");
+      expect(fallback.requests).toHaveLength(0);
+    }
+  });
+
+  test("the estimate for a first ask that failed after it streamed counts the system text and the tools too", async () => {
+    const dropped: ModelProvider = {
+      name: "dropped",
+      model: "dropped-1",
+      async *stream() {
+        yield { type: "text_delta", text: "hi" };
+        throw new Error("connection reset");
+      },
+    };
+    const request = { system: "s".repeat(3000), messages: [], tools: [], maxOutputTokens: 100 };
+    const out: ModelEvent[] = [];
+    for await (const event of new FallbackProvider(dropped, new Named("small-1", [{ text: "ok", usage: { inputTokens: 1, outputTokens: 1 } }])).stream(request)) out.push(event);
+    const final = out.at(-1) as Extract<ModelEvent, { type: "message" }>;
+    expect(final.usage.inputTokens).toBeGreaterThanOrEqual(1000);
   });
 
   test("one model without a price leaves the pair without a price", () => {

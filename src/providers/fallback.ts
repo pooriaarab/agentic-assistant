@@ -80,9 +80,15 @@ export class FallbackProvider implements ModelProvider {
     if (failure !== undefined && request.signal?.aborted) throw failure;
 
     let spent: Usage = { inputTokens: 0, outputTokens: 0 };
-    if (final !== undefined) spent = final.usage;
-    else if (started) {
-      spent = { inputTokens: Math.ceil(JSON.stringify(request.messages).length / CHARS_PER_TOKEN), outputTokens: Math.ceil(heldChars / CHARS_PER_TOKEN) };
+    if (final !== undefined) {
+      // A bad count would widen the room below, so it stops the run now.
+      for (const value of [final.usage.inputTokens, final.usage.outputTokens]) {
+        if (!Number.isInteger(value) || value < 0) throw new ProviderError("provider reported invalid token usage; caps cannot be enforced");
+      }
+      spent = final.usage;
+    } else if (started) {
+      const { system, messages, tools } = request;
+      spent = { inputTokens: Math.ceil(JSON.stringify({ system, messages, tools }).length / CHARS_PER_TOKEN), outputTokens: Math.ceil(heldChars / CHARS_PER_TOKEN) };
     }
     const left = request.maxOutputTokens - spent.outputTokens;
     if (!(left > 0)) {
