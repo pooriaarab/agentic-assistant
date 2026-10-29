@@ -1,0 +1,107 @@
+import { APPROVER_KINDS, type ApproverKind } from "./approvals.js";
+
+/** Says that a machine made an output, and which one. Attach it to every result and every edit. */
+export interface Provenance {
+  generator: "ai";
+  /** The model that answered. After a fallback, this is the fallback model. */
+  model: string;
+  provider: string;
+  /** ISO 8601 time, in UTC. */
+  createdAt: string;
+  /** The id of the assistant principal that acted. */
+  actor: string;
+  /** The person the assistant acts for. */
+  onBehalfOf: string;
+  /** The tool that ran. Set on a tool result. */
+  tool?: string;
+  /** The risk of that tool. A host may mark only `risky` and `irreversible` results as edits. */
+  risk?: "safe" | "risky" | "irreversible";
+  /** Who approved the action, and what kind of approver it was. Check `kind` before you say a person approved. */
+  approvedBy?: Approver[];
+}
+
+export interface Approver {
+  id: string;
+  /** `unknown` when the approval gate did not say. */
+  kind: ApproverKind | "unknown";
+}
+
+export interface ProvenanceInput {
+  model: string;
+  provider: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+  actor: string;
+  onBehalfOf: string;
+  tool?: string;
+  risk?: Provenance["risk"];
+  approvedBy?: readonly Approver[];
+}
+
+/** The IPTC digital source type for content made by a model. */
+export const TRAINED_ALGORITHMIC_MEDIA = "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia";
+
+const MAX_LABEL_PART = 80;
+const RISKS = ["safe", "risky", "irreversible"];
+// Control characters, bidi controls, and line separators. A label is shown to a person.
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\u115f\u1160\u3164\uffa0\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
+
+export function createProvenance(input: ProvenanceInput): Provenance {
+  if (!Number.isFinite(input.createdAt)) throw new RangeError("createdAt must be a finite number of epoch milliseconds");
+  for (const [name, value] of [["model", input.model], ["provider", input.provider], ["actor", input.actor], ["onBehalfOf", input.onBehalfOf]] as const) {
+    if (typeof value !== "string" || value === "") throw new TypeError(`${name} must be a non-empty string`);
+  }
+  if (input.tool !== undefined && (typeof input.tool !== "string" || input.tool === "")) throw new TypeError("tool must be a non-empty string");
+  if (input.risk !== undefined && !RISKS.includes(input.risk)) throw new TypeError(`risk must be one of ${RISKS.join(", ")}`);
+  for (const a of input.approvedBy ?? []) {
+    if (typeof a?.id !== "string" || a.id === "") throw new TypeError("an approver needs a non-empty id");
+    if (a.kind !== "unknown" && !APPROVER_KINDS.includes(a.kind)) throw new TypeError(`approver kind must be one of ${APPROVER_KINDS.join(", ")}, unknown`);
+  }
+  const approvers = [...new Map((input.approvedBy ?? []).map((a) => [`${a.kind}:${a.id}`, { id: a.id, kind: a.kind }])).values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
+  return {
+    generator: "ai",
+    model: input.model,
+    provider: input.provider,
+    createdAt: new Date(input.createdAt).toISOString(),
+    actor: input.actor,
+    onBehalfOf: input.onBehalfOf,
+    ...(input.tool !== undefined ? { tool: input.tool } : {}),
+    ...(input.risk !== undefined ? { risk: input.risk } : {}),
+    ...(approvers.length > 0 ? { approvedBy: approvers } : {}),
+  };
+}
+
+/**
+ * A JSON-LD marker for a document or a file. Store it next to the content the assistant made.
+ * It uses schema.org terms and the IPTC `trainedAlgorithmicMedia` source type.
+ */
+export function provenanceMarker(provenance: Provenance): Record<string, unknown> {
+  const property = (name: string, value: string) => ({ "@type": "PropertyValue", name, value });
+  return {
+    "@context": "https://schema.org",
+    "@type": "CreativeWork",
+    digitalSourceType: TRAINED_ALGORITHMIC_MEDIA,
+    dateCreated: provenance.createdAt,
+    creator: { "@type": "SoftwareApplication", name: provenance.model, publisher: { "@type": "Organization", name: provenance.provider } },
+    additionalProperty: [
+      property("actor", provenance.actor),
+      property("onBehalfOf", provenance.onBehalfOf),
+      ...(provenance.tool !== undefined ? [property("tool", provenance.tool)] : []),
+      ...(provenance.risk !== undefined ? [property("risk", provenance.risk)] : []),
+      ...(provenance.approvedBy ?? []).map((who) => property(`approvedBy:${who.kind}`, who.id)),
+    ],
+  };
+}
+
+const part = (text: string): string => {
+  const clean = text.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+  const chars = Array.from(clean); // by code point, so a surrogate pair is never cut in half
+  return chars.length > MAX_LABEL_PART ? `${chars.slice(0, MAX_LABEL_PART - 1).join("")}\u2026` : clean;
+};
+
+/** A short text for a person to read, such as "AI-generated by model-1 (acme), approved by ana". */
+export function provenanceLabel(provenance: Provenance): string {
+  const who = (a: Approver) => (a.kind === "human" ? part(a.id) : `${part(a.id)} (${a.kind === "host" ? "host rule" : a.kind === "agent" ? "agent" : "unverified"})`);
+  const approved = provenance.approvedBy?.length ? `, approved by ${provenance.approvedBy.map(who).join(", ")}` : "";
+  return `AI-generated by ${part(provenance.model)} (${part(provenance.provider)})${approved}`;
+}

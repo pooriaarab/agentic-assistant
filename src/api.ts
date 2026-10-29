@@ -234,7 +234,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
     if (approve) {
       // The approver names the exact call it saw.
       if (body.digest !== entry.request.digest) return fail(409, "digest does not match the pending call");
-      decision = { requestId: id, approved: true, digest: entry.request.digest, decidedBy: caller.id };
+      decision = { requestId: id, approved: true, digest: entry.request.digest, decidedBy: caller.id, approverKind: caller.kind === "human" ? "human" : "agent" };
     } else {
       const reason = typeof body.reason === "string" ? body.reason.slice(0, MAX_REASON_CHARS) : undefined;
       decision = { requestId: id, approved: false, decidedBy: caller.id, reason };

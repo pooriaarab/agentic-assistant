@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
 import { ConfigError, buildSetup, readTextFile, runChat, type ChatConfig, type ChatIo, type Setup } from "./chat.js";
 import type { AssistantEvent, RunLimits } from "./loop.js";
+import { provenanceLabel } from "./provenance.js";
 import { printable } from "./text.js";
 import type { Message, Pricing } from "./types.js";
 import { VERSION } from "./version.js";
@@ -248,6 +249,7 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
     case "done":
       endText();
       io.err(`done: ${event.reason}. tokens in ${event.totals.inputTokens}, out ${event.totals.outputTokens}. cost $${event.totals.costUsd.toFixed(6)} (estimate)${event.error ? `. error: ${oneLine(event.error)}` : ""}`);
+      if (event.provenance !== undefined) io.err(oneLine(provenanceLabel(event.provenance), 300));
       break;
     default:
       break;

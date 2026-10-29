@@ -16,8 +16,12 @@ export interface ApprovalRequest {
   actor: Actor;
 }
 
+/** Who gave an approval. The gate says it. `human` means a signed-in person, `host` means a rule the host set up, `agent` means another agent. */
+export type ApproverKind = "human" | "agent" | "host";
+export const APPROVER_KINDS: readonly ApproverKind[] = ["human", "agent", "host"];
+
 export type ApprovalDecision =
-  | { requestId: string; approved: true; digest: string; decidedBy: string }
+  | { requestId: string; approved: true; digest: string; decidedBy: string; /** Leave it out when you do not know. The record then says "unknown". */ approverKind?: ApproverKind }
   | { requestId: string; approved: false; decidedBy?: string; reason?: string };
 
 /**
@@ -98,9 +102,9 @@ export class QueueApprovalGate implements ApprovalGate {
     });
   }
 
-  approve(id: string, decidedBy: string): void {
+  approve(id: string, decidedBy: string, approverKind?: ApproverKind): void {
     const entry = this.take(id);
-    entry.resolve({ requestId: id, approved: true, digest: entry.request.digest, decidedBy });
+    entry.resolve({ requestId: id, approved: true, digest: entry.request.digest, decidedBy, ...(approverKind ? { approverKind } : {}) });
   }
 
   reject(id: string, decidedBy?: string, reason?: string): void {

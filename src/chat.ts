@@ -159,14 +159,14 @@ class CommandLineGate implements ApprovalGate {
     const index = this.unused.indexOf(request.digest);
     if (index >= 0) {
       this.unused.splice(index, 1);
-      return { requestId: request.id, approved: true, digest: request.digest, decidedBy: "cli:pre-approved" };
+      return { requestId: request.id, approved: true, digest: request.digest, decidedBy: "cli:pre-approved", approverKind: "host" };
     }
     if (this.mode === "ask" && this.ask !== undefined) {
       // The question comes before the event is shown, so it carries the label itself.
       // The arguments can be large, so the question shows at most MAX_QUESTION_ARGUMENT_CHARS of them.
       const args = cutText(printable(JSON.stringify(request.input)), MAX_QUESTION_ARGUMENT_CHARS);
       const answer = await this.ask(`[machine-made request] Approve ${printable(request.tool)} (${request.risk}) with ${args}? [y/N] `);
-      if (/^y(es)?$/i.test(answer.trim())) return { requestId: request.id, approved: true, digest: request.digest, decidedBy: `cli:${this.user}` };
+      if (/^y(es)?$/i.test(answer.trim())) return { requestId: request.id, approved: true, digest: request.digest, decidedBy: `cli:${this.user}`, approverKind: "human" };
     }
     return { requestId: request.id, approved: false, reason: "not approved on the command line" };
   }
