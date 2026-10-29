@@ -179,7 +179,12 @@ function defaultIo(): CliIo {
     readFile: readTextFile,
     readStdin: async () => {
       const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      let size = 0;
+      for await (const chunk of process.stdin) {
+        size += (chunk as Buffer).length;
+        if (size > MAX_STDIN_BYTES) throw new UsageError(`the message on stdin is over ${MAX_STDIN_BYTES} bytes`);
+        chunks.push(chunk as Buffer);
+      }
       return Buffer.concat(chunks).toString("utf8");
     },
     isTTY: Boolean(process.stdin.isTTY),
@@ -194,10 +199,24 @@ function defaultIo(): CliIo {
   };
 }
 
+/**
+ * Text from a model, a tool, or a server can hold control characters. A terminal reads them as commands
+ * (clear the screen, set the title). Drop them all, except a line break and a tab. A bare carriage
+ * return would let text overwrite the line, so it goes too. Text direction marks and zero-width
+ * characters go as well: they can make an argument read differently from what runs.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
+export const printable = (text: string): string => text.replace(CONTROL, "");
+
 const oneLine = (value: unknown, max = 200): string => {
-  const text = (typeof value === "string" ? value : JSON.stringify(value) ?? "null").replace(/\s+/g, " ");
-  return text.length > max ? `${text.slice(0, max)}...` : text;
+  const text = printable(typeof value === "string" ? value : JSON.stringify(value) ?? "null").replace(/\s+/g, " ");
+  const points = Array.from(text); // cut between characters, never inside an emoji
+  return points.length > max ? `${points.slice(0, max).join("")}...` : text;
 };
+
+const MAX_STDIN_BYTES = 1_000_000;
+const MAX_SKIPPED_LINES = 20;
 
 /** Prints one event for a person. Every assistant part says it is machine-made. */
 function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): void {
@@ -209,21 +228,21 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
     case "text_delta":
       if (!state.inText) io.out("Assistant (machine-made): ");
       state.inText = true;
-      io.out(event.text);
+      io.out(printable(event.text));
       break;
     case "turn_end":
       endText();
       break;
     case "tool_call":
       endText();
-      io.err(`[machine-made] tool call: ${event.name} ${oneLine(event.input)}`);
+      io.err(`[machine-made] tool call: ${oneLine(event.name, 100)} ${oneLine(event.input)}`);
       break;
     case "approval_request":
       endText();
-      io.err(`[machine-made] approval needed: ${event.request.tool} (${event.request.risk}) ${oneLine(event.request.input)}`);
+      io.err(`[machine-made] approval needed: ${oneLine(event.request.tool, 100)} (${event.request.risk}) ${oneLine(event.request.input)}`);
       break;
     case "approval_decision":
-      io.err(`approval: ${event.approved ? `approved by ${event.decidedBy ?? "unknown"}` : `not approved (${event.reason ?? "no reason"})`}`);
+      io.err(`approval: ${event.approved ? `approved by ${oneLine(event.decidedBy ?? "unknown", 100)}` : `not approved (${oneLine(event.reason ?? "no reason", 200)})`}`);
       break;
     case "tool_result":
       io.err(`tool result (${event.isError ? "error" : "ok"}${event.denied ? `, ${event.denied}` : ""}): ${oneLine(event.content)}`);
@@ -270,11 +289,12 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   let setup: Setup | undefined;
   try {
     setup = await buildSetup(config, chatIo);
-    for (const skip of setup.skipped) io.err(`skipped tool ${skip.name}: ${skip.reason}`);
+    for (const skip of setup.skipped.slice(0, MAX_SKIPPED_LINES)) io.err(`skipped tool ${oneLine(skip.name, 100)}: ${oneLine(skip.reason, 200)}`);
+    if (setup.skipped.length > MAX_SKIPPED_LINES) io.err(`skipped ${setup.skipped.length - MAX_SKIPPED_LINES} more tools`);
     if (parsed.command === "mcp") {
       const { startAssistantMcp } = await import("./mcp-server.js");
-      await startAssistantMcp(setup);
-      return 0; // the server keeps the process alive; the caller ends it
+      await startAssistantMcp(setup); // returns when the client closes its input
+      return 0;
     }
     const text = parsed.message ?? (io.isTTY ? undefined : (await io.readStdin()).trim());
     let transcript: Message[] = [];
@@ -295,13 +315,14 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     }
   } catch (error) {
     if (error instanceof ConfigError || error instanceof UsageError) {
-      io.err(`${error.name}: ${error.message}`);
+      io.err(`${error.name}: ${oneLine(error.message, 500)}`);
       return 2;
     }
-    io.err(`${error instanceof Error ? error.name : "Error"}: ${error instanceof Error ? error.message : String(error)}`);
+    io.err(`${error instanceof Error ? error.name : "Error"}: ${oneLine(error instanceof Error ? error.message : String(error), 500)}`);
     return 1;
   } finally {
-    if (parsed.command !== "mcp") await setup?.close().catch(() => undefined);
+    // A tool server that never closes must not keep the process alive.
+    await Promise.race([setup?.close().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 5000).unref())]);
   }
 }
 
@@ -317,11 +338,7 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   runCli(process.argv.slice(2)).then(
-    (code) => {
-      // On zero for mcp, fall off the end so the server keeps its stdio open.
-      if (code !== 0) process.exit(code);
-      else if (!process.argv.includes("mcp")) process.exit(0);
-    },
+    (code) => process.exit(code),
     (error: unknown) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);

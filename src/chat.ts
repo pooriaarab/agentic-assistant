@@ -74,8 +74,10 @@ export function parseTarget(target: string, headerEnv: string[], env: ChatIo["en
     if (!isSecureUrl(target)) throw new ConfigError("--tools needs an https URL, or http on localhost only");
     const headers: Record<string, string> = {};
     for (const entry of headerEnv) {
-      const [name, variable] = entry.split("=", 2);
-      if (!name || !variable) throw new ConfigError(`--tools-header-env needs header=ENV_NAME, got "${entry}"`);
+      const at = entry.indexOf("=");
+      const name = at < 0 ? "" : entry.slice(0, at);
+      const variable = at < 0 ? "" : entry.slice(at + 1);
+      if (!name || !variable || variable.includes("=")) throw new ConfigError(`--tools-header-env needs header=ENV_NAME, got "${entry}"`);
       const value = env[variable];
       if (!value) throw new ConfigError(`environment variable ${variable} is not set`);
       headers[name] = value;
@@ -153,7 +155,9 @@ class CommandLineGate implements ApprovalGate {
       return { requestId: request.id, approved: true, digest: request.digest, decidedBy: "cli:pre-approved" };
     }
     if (this.mode === "ask" && this.ask !== undefined) {
-      const answer = await this.ask(`Approve ${request.tool} (${request.risk}) with ${JSON.stringify(request.input)}? [y/N] `);
+      // The question comes before the event is shown, so it carries the label itself.
+      const show = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "");
+      const answer = await this.ask(`[machine-made request] Approve ${show(request.tool)} (${request.risk}) with ${show(JSON.stringify(request.input))}? [y/N] `);
       if (/^y(es)?$/i.test(answer.trim())) return { requestId: request.id, approved: true, digest: request.digest, decidedBy: `cli:${this.user}` };
     }
     return { requestId: request.id, approved: false, reason: "not approved on the command line" };

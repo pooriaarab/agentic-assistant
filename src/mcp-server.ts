@@ -22,7 +22,7 @@ const TOOL = {
 const fail = (text: string) => ({ isError: true, content: [{ type: "text" as const, text }] });
 
 /** An MCP server with one tool, `assistant_chat`. Each call starts a new conversation. */
-export function createAssistantMcpServer(setup: Setup): Server {
+export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal): Server {
   const server = new Server({ name: "agentic-assistant", version: VERSION }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [TOOL] }));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -31,22 +31,39 @@ export function createAssistantMcpServer(setup: Setup): Server {
     if (typeof message !== "string" || message.trim() === "" || message.length > MAX_MESSAGE_CHARS) {
       return fail(`message must be a text of 1 to ${MAX_MESSAGE_CHARS} characters`);
     }
+    // A call stops when the client cancels it, or when the server shuts down.
+    const call = new AbortController();
+    const stop = () => call.abort();
+    extra.signal.addEventListener("abort", stop, { once: true });
+    shutdown?.addEventListener("abort", stop, { once: true });
     let reply = "";
     const toolCalls: { name: string; isError: boolean; denied?: string }[] = [];
     let outcome: { reason: string; totals: unknown } | undefined;
-    for await (const event of runChat(setup, [{ role: "user", content: [{ type: "text", text: message }] }], extra.signal)) {
+    for await (const event of runChat(setup, [{ role: "user", content: [{ type: "text", text: message }] }], call.signal)) {
       if (event.type === "text_delta") reply += event.text;
       else if (event.type === "turn_start") reply = "";
       else if (event.type === "tool_result") toolCalls.push({ name: event.name, isError: event.isError, ...(event.denied ? { denied: event.denied } : {}) });
       else if (event.type === "done") outcome = { reason: event.reason, totals: event.totals };
     }
+    extra.signal.removeEventListener("abort", stop);
+    shutdown?.removeEventListener("abort", stop);
     const result = { machineMade: true, reply, reason: outcome?.reason ?? "unknown", toolCalls, totals: outcome?.totals };
     return { ...(outcome?.reason === "end_turn" ? {} : { isError: true }), content: [{ type: "text" as const, text: JSON.stringify(result) }] };
   });
   return server;
 }
 
+/** Serves on stdio. Resolves when the client closes its input, or the transport closes. */
 export async function startAssistantMcp(setup: Setup): Promise<void> {
-  const server = createAssistantMcpServer(setup);
+  const shutdown = new AbortController();
+  const server = createAssistantMcpServer(setup, shutdown.signal);
+  const ended = new Promise<void>((resolve) => {
+    server.onclose = resolve;
+    process.stdin.once("end", resolve);
+    process.stdin.once("close", resolve);
+  });
   await server.connect(new StdioServerTransport());
+  await ended;
+  shutdown.abort(); // calls in flight stop with a reason, and their tool calls are cancelled
+  await server.close().catch(() => undefined);
 }

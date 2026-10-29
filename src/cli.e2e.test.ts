@@ -1,5 +1,5 @@
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { runCli, type CliIo } from "./cli.js";
 import { serveNotes } from "../test-fixtures/notes-http.mjs";
 import type { ScriptedTurn } from "./testing.js";
 import { VERSION } from "./version.js";
@@ -20,6 +21,11 @@ import { VERSION } from "./version.js";
 // 6. A run that stopped on a cap or an error exits with 0.
 // 7. JSON mode loses the machine-made label, or text mode prints an assistant part without it.
 // 8. The MCP server prints to stdout besides the protocol, or answers a bad call with success.
+// 9. A tool name, a tool result, or the model's text carries a terminal escape code to the user's terminal.
+// 10. A huge stdin or a flood of "skipped" lines fills memory or the screen.
+// 11. The MCP server keeps running, with its tool servers, after the client closes stdin.
+// 12. A pre-approval for the same arguments covers another tool, or an approval prompt says yes to a blank or "n".
+// 13. A header setting with a second "=" reads half of the variable name.
 
 const CLI = new URL("../dist/cli.js", import.meta.url).pathname;
 const FIXTURE_STDIO = new URL("../test-fixtures/notes-stdio.mjs", import.meta.url).pathname;
@@ -275,5 +281,205 @@ describe("MCP server", () => {
   test("refuses --approve ask", async () => {
     const result = await cli(["mcp", "--tools", notes.url, "--provider", "scripted", ...readOnly, "--script", "x", "--approve", "ask"]);
     expect(result.code).toBe(2);
+  });
+});
+
+function fakeIo(overrides: Partial<CliIo> = {}) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const questions: string[] = [];
+  const io: CliIo = {
+    out: (text) => void out.push(text),
+    err: (line) => void err.push(line),
+    env: {},
+    readFile: (path) => readFileSync(path, "utf8"),
+    readStdin: async () => "",
+    isTTY: false,
+    ask: async (question) => {
+      questions.push(question);
+      return "n";
+    },
+    ...overrides,
+  };
+  return { io, out, err, questions };
+}
+
+describe("approving at the terminal", () => {
+  const args = (turns: ScriptedTurn[], extra: string[] = []) => [...base([...writer, "--approve", "ask", "--script", script(turns), ...extra]), "go"];
+
+  test.each([["y"], ["Yes"]])("answer %j runs the exact call that was shown", async (answer) => {
+    const before = notes.counters.notes_write ?? 0;
+    const { io, questions } = fakeIo({ isTTY: true, ask: async (q) => (questions.push(q), answer) });
+    const code = await runCli(args([write("n5", "hi"), { text: "ok" }]), io);
+    expect(code).toBe(0);
+    expect(questions[0]).toContain("notes_write");
+    expect(questions[0]).toContain('{"id":"n5","text":"hi"}');
+    expect(notes.counters.notes_write).toBe(before + 1);
+  });
+
+  test.each([["n"], [""], ["maybe"], ["yes please do it"]])("answer %j does not run it", async (answer) => {
+    const before = notes.counters.notes_write ?? 0;
+    const { io } = fakeIo({ isTTY: true, ask: async () => answer });
+    await runCli(args([write(), { text: "ok" }]), io);
+    expect(notes.counters.notes_write ?? 0).toBe(before);
+  });
+
+  test("the question carries the label and has no control characters", async () => {
+    const questions: string[] = [];
+    const { io } = fakeIo({ isTTY: true, ask: async (q) => (questions.push(q), "n") });
+    await runCli(args([{ toolCalls: [{ name: "notes_write", input: { id: "\u009b2J\u202Ex", text: "t" } }] }, { text: "ok" }]), io);
+    expect(questions[0]).toContain("[machine-made request] Approve notes_write");
+    expect(questions[0]).not.toMatch(/[\u009b\u202e]/);
+  });
+
+  test("a conversation on a terminal keeps going until exit", async () => {
+    const answers = ["first question", "second question", "exit"];
+    const { io, out } = fakeIo({ isTTY: true, ask: async () => answers.shift() ?? "exit" });
+    const code = await runCli(["chat", "--tools", notes.url, "--provider", "scripted", ...readOnly, "--script", script([{ text: "one" }, { text: "two" }])], io);
+    expect(code).toBe(0);
+    expect(out.join("")).toContain("one");
+    expect(out.join("")).toContain("two");
+  });
+});
+
+describe("hardening", () => {
+  test("removes terminal control characters from text, tool lines, and skipped-tool lines", async () => {
+    const turns: ScriptedTurn[] = [read("\u001b[2Jx"), { text: "\u001b[2J\u001b]0;pwned\u0007hello\r\nworld" }];
+    const result = await cli(base([...readOnly, "--script", script(turns), "go"]));
+    expect(result.stdout + result.stderr).not.toMatch(/[\u001b\u0007\r]/);
+    expect(result.stdout).toContain("hello");
+    expect(result.stdout).toContain("world");
+    expect(result.stderr).toContain("skipped tool evil[2Jname");
+  });
+
+  test("removes control characters from a tool name the model made up", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ toolCalls: [{ name: "\u001b]0;pwned\u0007\u001b[2J", input: {} }] }, { text: "ok" }]), "go"]));
+    expect(result.stderr + result.stdout).not.toMatch(/[\u001b\u0007]/);
+    expect(result.stderr).toContain("[machine-made] tool call:");
+  });
+
+  test("removes text direction marks and zero-width characters, and cuts between characters", async () => {
+    const result = await cli(base([...readOnly, "--script", script([read(`\u202Eetirw_seton\u200b${"😀".repeat(300)}`), { text: "ok" }]), "go"]));
+    expect(result.stderr).not.toMatch(/[\u202e\u200b]/);
+    expect(result.stderr).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
+  test("removes control characters from the error of a tool server", async () => {
+    const evil = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "\u001b]0;x\u0007boom" } }));
+      });
+    });
+    await new Promise<void>((resolve) => evil.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(evil.address() as AddressInfo).port}/mcp`;
+      const result = await cli(["chat", "--tools", url, ...readOnly, "--provider", "scripted", "--script", script([{ text: "x" }]), "go"]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("boom");
+      expect(result.stderr).not.toMatch(/[\u001b\u0007]/);
+    } finally {
+      evil.closeAllConnections();
+      evil.close();
+    }
+  });
+
+  test("a message of exactly 1,000,000 bytes is accepted", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ text: "x" }])]), { stdin: "a".repeat(1_000_000) });
+    expect(result.code).toBe(0);
+  });
+
+  test("a multibyte message over 1,000,000 bytes is refused", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ text: "x" }])]), { stdin: "é".repeat(500_001) });
+    expect(result.code).toBe(2);
+  });
+
+  test("--json keeps events as they are, escaped by JSON", async () => {
+    const result = await cli(base([...readOnly, "--json", "--script", script([{ text: "\u001b[2Jhi" }]), "go"]));
+    expect(result.stdout).not.toContain("\u001b");
+    expect(result.stdout).toContain("\\u001b[2Jhi");
+  });
+
+  test("a message on stdin over 1 MB exits with 2", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ text: "x" }])]), { stdin: "a".repeat(1_000_001) });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("over 1000000 bytes");
+  });
+
+  test.each([
+    ["a header setting with a second equals sign", ["--tools-header-env", "authorization=A=B"], /header=ENV_NAME/],
+    ["a header setting with no variable", ["--tools-header-env", "authorization"], /header=ENV_NAME/],
+  ])("%s exits with 2", async (_name, extra, message) => {
+    const result = await cli(base([...readOnly, ...extra, "--script", script([{ text: "x" }]), "go"]));
+    expect(result.code).toBe(2);
+    expect(result.stderr).toMatch(message);
+  });
+
+  test("a header setting on a stdio target exits with 2", async () => {
+    const result = await cli(["chat", "--tools", JSON.stringify([process.execPath, FIXTURE_STDIO]), "--tools-header-env", "a=B", "--provider", "scripted", ...readOnly, "--script", script([{ text: "x" }]), "go"], { env: { B: "v" } });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("http(s) --tools URL only");
+  });
+
+  test("a pre-approval for the same arguments does not cover another tool", async () => {
+    const before = notes.counters.notes_write ?? 0;
+    const result = await cli(base([...writer, "--approve-call", '{"tool":"notes_read","input":{"id":"n1","text":"x"}}', "--script", script([write("n1", "x"), { text: "ok" }]), "go"]));
+    expect(result.stderr).toContain("not approved");
+    expect(notes.counters.notes_write ?? 0).toBe(before);
+  });
+});
+
+describe("MCP server shutdown", () => {
+  test("a call still running when stdin closes is stopped, and the process exits at once", async () => {
+    const child = spawn(process.execPath, [CLI, "mcp", "--tools", notes.url, "--provider", "scripted", ...readOnly, "--script", script([{ toolCalls: [{ name: "slow", input: {} }] }, { text: "late" }])], {
+      env: { PATH: process.env.PATH },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "assistant_chat", arguments: { message: "be slow" } } });
+    await new Promise((resolve) => setTimeout(resolve, 1200)); // the call has reached the five-second tool
+    const started = Date.now();
+    child.stdin.end();
+    const code = await Promise.race([exited, new Promise<string>((resolve) => setTimeout(() => resolve("still running"), 4000))]);
+    if (code === "still running") child.kill();
+    expect(code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(3500);
+  });
+});
+
+describe("MCP server process", () => {
+  function startServer(extra: string[]) {
+    const child = spawn(process.execPath, [CLI, "mcp", "--tools", notes.url, "--provider", "scripted", ...extra], { env: { PATH: process.env.PATH }, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    const waitFor = async (predicate: () => boolean) => {
+      for (let i = 0; i < 100 && !predicate(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    };
+    return { child, send, exited, waitFor, stdout: () => stdout };
+  }
+
+  test("prints only protocol on stdout, runs a pre-approved call, and stops when stdin closes", async () => {
+    const before = notes.counters.notes_write ?? 0;
+    const server = startServer([...writer, "--approve-call", '{"tool":"notes_write","input":{"id":"n2","text":"y"}}', "--script", script([write("n2", "y"), { text: "written" }])]);
+    server.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    server.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    server.send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "assistant_chat", arguments: { message: "write it" } } });
+    await server.waitFor(() => server.stdout().includes('"id":2'));
+    const lines = server.stdout().split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    for (const line of lines) expect(JSON.parse(line)).toMatchObject({ jsonrpc: "2.0" });
+    const reply = JSON.parse(lines.find((line) => line.includes('"id":2')) as string);
+    expect(JSON.parse(reply.result.content[0].text).toolCalls).toEqual([{ name: "notes_write", isError: false }]);
+    expect(notes.counters.notes_write).toBe(before + 1);
+    server.child.stdin.end();
+    const code = await Promise.race([server.exited, new Promise<string>((resolve) => setTimeout(() => resolve("still running"), 5000))]);
+    if (code === "still running") server.child.kill();
+    expect(code).toBe(0);
   });
 });

@@ -10,7 +10,7 @@ const TOOLS = [
   { name: "big", description: "Return a huge text", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "boom", description: "Always fail", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "img", description: "Return an image", inputSchema: object({}), annotations: { readOnlyHint: true } },
-  { name: "slow", description: "Answer after two seconds", inputSchema: object({}), annotations: { readOnlyHint: true } },
+  { name: "slow", description: "Answer after five seconds", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "structured", description: "Return structured content only", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "pid", description: "Return the server process id", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "long_text", description: "x".repeat(5000), inputSchema: object({ id: { type: "string", description: "y".repeat(5000) } }), annotations: { readOnlyHint: true } },
@@ -19,6 +19,7 @@ const TOOLS = [
   { name: "examples_prop", description: "A property named examples", inputSchema: object({ examples: { type: "array" } }, ["examples"]), annotations: { readOnlyHint: true } },
   { name: "stats", description: "Read the call counters", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "bad name!", description: "A name the assistant refuses", inputSchema: object({}) },
+  { name: "evil\u001b[2Jname", description: "A name with a terminal escape code", inputSchema: object({}) },
   { name: "bad_schema", description: "A schema that does not compile", inputSchema: { type: "object", properties: { a: { type: "nonsense" } } } },
 ];
 
@@ -52,7 +53,7 @@ export function createNotesServer(counters = {}, { pageSize, endless, duplicate 
       case "img":
         return { content: [{ type: "image", data: "AAAA", mimeType: "image/png" }, { type: "text", text: "caption" }] };
       case "slow":
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 5000));
         return text("late");
       case "structured":
         return { content: [], structuredContent: { a: 1 } };
