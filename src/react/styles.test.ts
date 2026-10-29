@@ -40,7 +40,7 @@ function contrast(a: string, b: string): number {
 
 describe("panel styles", () => {
   test("reads the palette from agentic-design tokens, with no hex color of its own", () => {
-    expect(Object.keys(mapping)).toHaveLength(13);
+    expect(Object.keys(mapping)).toHaveLength(14);
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
       for (const [key, value] of Object.entries(variablesFor(name))) expect(value, `${name} ${key}`).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
@@ -58,8 +58,8 @@ describe("panel styles", () => {
     ["accent-fg", "accent", 4.5],
     ["warn-fg", "warn-bg", 4.5],
     ["danger", "bg", 4.5],
-    ["border", "bg", 3],
-    ["border", "card-bg", 3],
+    ["edge", "bg", 3],
+    ["edge", "card-bg", 3],
     ["accent", "bg", 3],
     ["focus", "bg", 3],
     ["focus", "card-bg", 3],
@@ -84,6 +84,7 @@ describe("panel styles", () => {
       fg: "CanvasText",
       muted: "CanvasText",
       border: "CanvasText",
+      edge: "CanvasText",
       "machine-fg": "CanvasText",
       "warn-fg": "CanvasText",
       accent: "LinkText",
@@ -93,8 +94,14 @@ describe("panel styles", () => {
   });
 
   test("buttons meet the minimum target size, and focus is visible", () => {
-    expect(css).toMatch(/\.aa-button \{[^}]*min-height: 2rem;[^}]*min-width: 2rem;/);
-    expect(css).toMatch(/:focus-visible \{[^}]*outline: 3px solid var\(--aa-focus\)/);
+    expect(css).toMatch(/\.agd-assistant__button \{[^}]*min-height: var\(--agd-size-control, 2\.25rem\);[^}]*min-width: 2rem;/);
+    expect(css).toMatch(/:focus-visible \{[^}]*outline: 2px solid var\(--aa-focus\)/);
+  });
+
+  test("every class uses the agd- prefix, and the text field and buttons keep a strong edge", () => {
+    expect([...css.replace(/\/\*[^]*?\*\//g, "").matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1] as string).filter((name) => !name.startsWith("agd-"))).toEqual([]);
+    expect(css).toMatch(/\.agd-assistant__input \{[^}]*border: 1px solid var\(--aa-edge\)/);
+    expect(css).toMatch(/\.agd-assistant__button \{[^}]*border: 1px solid var\(--aa-edge\)/);
   });
 
   test("loads nothing from another host", () => {

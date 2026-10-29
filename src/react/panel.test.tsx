@@ -97,14 +97,14 @@ describe("assistant panel", () => {
     expect(await screen.findByText("Hel")).toBeTruthy();
     feed.push({ type: "text_delta", text: "lo there" });
     expect(await screen.findByText("Hello there")).toBeTruthy();
-    expect(container.querySelectorAll(".aa-assistant")).toHaveLength(1);
-    expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelectorAll(".agd-assistant__assistant")).toHaveLength(1);
+    expect(container.querySelector(".agd-assistant__assistant")?.getAttribute("aria-busy")).toBe("true");
     feed.push({ type: "turn_end", turn: 1, usage: { inputTokens: 1, outputTokens: 1 }, totals: { inputTokens: 1, outputTokens: 1, costUsd: 0 }, answeredBy: { provider: "scripted", model: "scripted-1", fallback: false } });
     feed.push(done());
     feed.end();
-    await waitFor(() => expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("false"));
-    expect(within(container.querySelector(".aa-assistant") as HTMLElement).getByText("Machine-made")).toBeTruthy();
-    expect(container.querySelector(".aa-user")?.textContent).not.toContain("Machine-made");
+    await waitFor(() => expect(container.querySelector(".agd-assistant__assistant")?.getAttribute("aria-busy")).toBe("false"));
+    expect(within(container.querySelector(".agd-assistant__assistant") as HTMLElement).getByText("AI-generated")).toBeTruthy();
+    expect(container.querySelector(".agd-assistant__user")?.textContent).not.toContain("AI-generated");
   });
 
   test("shows a tool card with its arguments and result as text, never as HTML", async () => {
@@ -115,7 +115,7 @@ describe("assistant panel", () => {
     await user.type(composer(), "read it{Enter}");
     const card = await screen.findByRole("article", { name: "Tool call: notes_read" });
     await within(card).findByText("Done");
-    expect(within(card).getByText("Machine-made")).toBeTruthy();
+    expect(within(card).getByText("AI-generated")).toBeTruthy();
     expect(within(card).getByLabelText("Arguments for notes_read").textContent).toContain('"id": "n1"');
     expect(within(card).getByLabelText("Result of notes_read").textContent).toContain(payload);
     expect(container.querySelector("img")).toBeNull();
@@ -131,12 +131,12 @@ describe("assistant panel", () => {
     const prompt = await screen.findByRole("group", { name: /Approval needed/ });
     expect(document.activeElement).toBe(prompt);
     expect(within(prompt).getByLabelText("Exact arguments for notes_write").textContent).toContain('"id": "n9"');
-    expect(within(prompt).getByText("Machine-made")).toBeTruthy();
+    expect(within(prompt).getByText("AI-generated")).toBeTruthy();
     expect(within(prompt).getByText("This can change data.")).toBeTruthy();
     expect(gate.pending()).toHaveLength(1);
     await user.click(within(prompt).getByRole("button", { name: "Approve notes_write" }));
     await screen.findByText("Saved.");
-    expect(within(container.querySelector(".aa-approval") as HTMLElement).getByText("Approved by human:alice")).toBeTruthy();
+    expect(within(container.querySelector(".agd-assistant__approval") as HTMLElement).getByText("Approved by human:alice")).toBeTruthy();
     expect(document.activeElement).toBe(composer());
     expect(gate.pending()).toHaveLength(0);
   });
@@ -186,9 +186,9 @@ describe("assistant panel", () => {
     void gate;
     const made = container.querySelectorAll('[data-machine-made="true"]');
     expect(made.length).toBeGreaterThanOrEqual(4);
-    for (const element of made) expect(within(element as HTMLElement).getAllByText("Machine-made").length).toBeGreaterThan(0);
-    expect(container.querySelectorAll(".aa-assistant, article.aa-card, .aa-approval")).toHaveLength(made.length);
-    for (const own of container.querySelectorAll(".aa-user")) expect(own.textContent).not.toContain("Machine-made");
+    for (const element of made) expect(within(element as HTMLElement).getAllByText("AI-generated").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".agd-assistant__assistant, article.agd-assistant__card, .agd-assistant__approval")).toHaveLength(made.length);
+    for (const own of container.querySelectorAll(".agd-assistant__user")) expect(own.textContent).not.toContain("AI-generated");
   });
 
   test("Enter sends, Shift+Enter adds a line, an empty message is not sent, and a double submit runs once", async () => {
@@ -247,10 +247,10 @@ describe("assistant panel", () => {
     feed.push({ type: "turn_start", turn: 1 });
     feed.push({ type: "text_delta", text: "Here is" });
     await screen.findByText("Here is");
-    expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector(".agd-assistant__assistant")?.getAttribute("aria-busy")).toBe("true");
     feed.end();
     expect(await screen.findByText(/could not finish/)).toBeTruthy();
-    expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("false");
+    expect(container.querySelector(".agd-assistant__assistant")?.getAttribute("aria-busy")).toBe("false");
   });
 
   test("a decision that is not a clear yes or no is not shown as a decline", async () => {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+Changed
+
+- The chat panel has the agentic-design 0.5 calm look: soft borders on cards and messages, a strong edge only on the text field and buttons, the `--agd-*` space, radius, and type scale, a lighter focus ring, and a dashed edge on a disabled button.
+- BREAKING: panel class names use the `agd-` prefix: `.aa-panel` is now `.agd-assistant`, and each part is `.agd-assistant__<part>` (for example `.agd-assistant__button`). Rename any override in your own CSS. The `--aa-*` variables keep their names. A new `--aa-edge` variable sets the strong edge, and `--aa-border` is now the soft border.
+- The label on every part the assistant makes reads "AI-generated" (it read "Machine-made"). It stays visible and is real text, so a screen reader reads it. The `data-machine-made` attribute does not change.
+- `agentic-design` peer dependency and dev dependency raised to `^0.5.0`.
+
 ## 0.6.1
 
 Patch. No change to the SDK, CLI or HTTP shape.
