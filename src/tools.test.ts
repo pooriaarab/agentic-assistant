@@ -8,7 +8,8 @@ import { ToolRegistry, defineTool } from "./tools.js";
 // 4. A schema that is not an object schema is accepted.
 // 5. A schema that does not compile is accepted, or throws a raw validator error.
 // 6. A schema with a draft marker or an id from another server breaks the registry, or two tools clash on one id.
-// 7. A nested error loses its path, or the message echoes the bad value.
+// 7. A schema with a pattern (a backtracking regular expression) is accepted, and one hostile input freezes the host.
+// 8. A nested error loses its path, or the message echoes the bad value.
 describe("input validation", () => {
   const schema = {
     type: "object",
@@ -51,6 +52,20 @@ describe("input validation", () => {
       .register({ name: "a", description: "d", inputSchema: withMeta, scope: "notes:read", handler: () => 1 })
       .register({ name: "b", description: "d", inputSchema: withMeta, scope: "notes:read", handler: () => 1 });
     expect(two.list()).toHaveLength(2);
+  });
+
+  test.each([
+    ["a pattern", { type: "object", properties: { q: { type: "string", pattern: "^(a|a)*$" } } }],
+    ["a nested pattern", { type: "object", properties: { a: { type: "object", properties: { b: { type: "string", pattern: "x" } } } } }],
+    ["a pattern in a list", { type: "object", anyOf: [{ properties: { q: { type: "string", pattern: "x" } } }] }],
+    ["patternProperties", { type: "object", patternProperties: { "^a": { type: "string" } } }],
+  ])("refuses a schema with %s", (_name, inputSchema) => {
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema, scope: "notes:read", handler: () => 1 })).toThrow(/regular expression/);
+  });
+
+  test("allows a property that is named pattern", () => {
+    const ok = { type: "object", properties: { pattern: { type: "string" } } };
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: ok, scope: "notes:read", handler: () => 1 })).not.toThrow();
   });
 
   test("checking an unknown tool is a problem, not a pass", () => {

@@ -24,6 +24,11 @@ import { ScriptedProvider, type ScriptedTurn } from "./testing.js";
 // 7. Non-text content (an image) is passed through as raw data.
 // 8. A plain-HTTP remote server, or a URL with a password, is accepted.
 // 9. The scope function throws and takes the whole load with it.
+// 10. A schema holds a regular expression that can freeze the host, or text that is far too long.
+// 11. A server sends an endless page list, a huge body, or never answers, and the load hangs or runs out of memory.
+// 12. A limit is NaN, zero, or negative and turns its guard off.
+// 13. A slow tool call is never cut off, or close() leaves the child process running.
+// 14. A duplicate tool name is loaded twice.
 
 const STDIO = { type: "stdio" as const, command: process.execPath, args: [new URL("../test-fixtures/notes-stdio.mjs", import.meta.url).pathname] };
 const readOnlyScope = (tool: { annotations?: { readOnlyHint?: boolean } }): Scope => (tool.annotations?.readOnlyHint ? "notes:read" : "notes:write");
@@ -32,7 +37,9 @@ const open: McpTools[] = [];
 let httpServer: Server | undefined;
 afterEach(async () => {
   await Promise.all(open.splice(0).map((m) => m.close()));
-  httpServer?.close();
+  httpServer?.closeAllConnections();
+  await new Promise<void>((resolve) => (httpServer ? httpServer.close(() => resolve()) : resolve()));
+  httpServer = undefined;
 });
 
 async function connect(options: Parameters<typeof connectMcpTools>[0]): Promise<McpTools> {
@@ -60,8 +67,10 @@ const call = (name: string, input: unknown): ScriptedTurn => ({ toolCalls: [{ na
 describe("MCP over stdio", () => {
   test("loads the good tools and skips the bad ones with a reason", async () => {
     const mcp = await connect({ transport: STDIO, scope: readOnlyScope, prefix: "n_" });
-    expect(mcp.tools.map((t) => t.name).sort()).toEqual(["n_big", "n_boom", "n_img", "n_notes_read", "n_notes_write", "n_stats"]);
-    expect(mcp.skipped.map((s) => s.name).sort()).toEqual(["bad name!", "bad_schema"]);
+    expect(mcp.tools.map((t) => t.name).sort()).toEqual([
+      "n_big", "n_boom", "n_img", "n_long_text", "n_notes_read", "n_notes_write", "n_pid", "n_slow", "n_stats", "n_structured",
+    ]);
+    expect(mcp.skipped.map((s) => s.name).sort()).toEqual(["bad name!", "bad_schema", "huge_schema", "with_pattern"]);
     expect(mcp.skipped.find((s) => s.name === "bad name!")?.reason).toMatch(/invalid tool name/);
     expect(mcp.skipped.find((s) => s.name === "bad_schema")?.reason).toMatch(/invalid input schema/);
   });
@@ -139,17 +148,76 @@ describe("MCP over stdio", () => {
   test("refuses a scope that is not valid", async () => {
     const mcp = await connect({ transport: STDIO, scope: "notes:delete" });
     expect(mcp.tools).toHaveLength(0);
-    expect(mcp.skipped.every((s) => /invalid scope/.test(s.reason) || /invalid tool name/.test(s.reason))).toBe(true);
+    expect(mcp.skipped.every((s) => /invalid scope|invalid tool name|too large/.test(s.reason))).toBe(true);
+  });
+
+  test("skips a schema with a regular expression and a schema that is too large", async () => {
+    const mcp = await connect({ transport: STDIO, scope: readOnlyScope });
+    expect(mcp.skipped.find((s) => s.name === "with_pattern")?.reason).toMatch(/regular expression/);
+    expect(mcp.skipped.find((s) => s.name === "huge_schema")?.reason).toMatch(/too large/);
+  });
+
+  test("cuts long descriptions, in the tool and in its schema", async () => {
+    const mcp = await connect({ transport: STDIO, scope: readOnlyScope, maxDescriptionChars: 100 });
+    const tool = mcp.tools.find((t) => t.name === "long_text");
+    expect(tool?.description.length).toBeLessThan(200);
+    const schema = tool?.inputSchema as { properties: { id: { description: string } } };
+    expect(schema.properties.id.description.length).toBeLessThan(200);
+  });
+
+  test.each([
+    ["maxTools", { maxTools: Number.NaN }],
+    ["maxOutputChars", { maxOutputChars: -1 }],
+    ["maxDescriptionChars", { maxDescriptionChars: Number.NaN }],
+    ["callTimeoutMs", { callTimeoutMs: 0 }],
+    ["loadTimeoutMs", { loadTimeoutMs: 1.5 }],
+    ["maxResponseBytes", { maxResponseBytes: 0 }],
+  ])("a bad %s is refused before anything starts", async (name, limits) => {
+    await expect(connectMcpTools({ transport: { type: "stdio", command: "does-not-exist" }, scope: "notes:read", ...limits })).rejects.toThrow(new RegExp(`${name} must be a positive integer`));
+  });
+
+  test("cuts off a slow tool call", async () => {
+    const mcp = await connect({ transport: STDIO, scope: readOnlyScope, callTimeoutMs: 300 });
+    const started = Date.now();
+    const { results } = await runWith(mcp, ["notes:read"], [call("slow", {}), { text: "done" }]);
+    expect(results[0]).toMatchObject({ isError: true, content: "tool failed" });
+    expect(Date.now() - started).toBeLessThan(1900);
+  });
+
+  test("reads structured content when there is no text", async () => {
+    const mcp = await connect({ transport: STDIO, scope: readOnlyScope });
+    const { results } = await runWith(mcp, ["notes:read"], [call("structured", {}), { text: "done" }]);
+    expect(results[0]?.content).toBe('{"a":1}');
+  });
+
+  test("close() ends the server process", async () => {
+    const mcp = await connectMcpTools({ transport: STDIO, scope: readOnlyScope });
+    const { results } = await runWith(mcp, ["notes:read"], [call("pid", {}), { text: "done" }]);
+    const pid = Number(results[0]?.content);
+    expect(pid).toBeGreaterThan(0);
+    await mcp.close();
+    const gone = async () => {
+      for (let i = 0; i < 30; i++) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return false;
+    };
+    expect(await gone()).toBe(true);
   });
 });
 
 describe("MCP over HTTP", () => {
-  async function serveNotes(): Promise<{ url: string; auth: string[]; counters: Record<string, number> }> {
+  async function serveNotes(serverOptions: { pageSize?: number; endless?: boolean; duplicate?: boolean } = {}): Promise<{ url: string; auth: string[]; counters: Record<string, number> }> {
     const auth: string[] = [];
     const counters: Record<string, number> = {};
     httpServer = createServer(async (req: IncomingMessage, res) => {
       auth.push(String(req.headers.authorization));
-      const server = createNotesServer(counters);
+      const server = createNotesServer(counters, serverOptions);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       res.on("close", () => {
         void transport.close();
@@ -169,6 +237,51 @@ describe("MCP over HTTP", () => {
     expect(results[0]).toMatchObject({ content: "note n9", isError: false });
     expect(auth.every((value) => value === "Bearer test-token")).toBe(true);
     expect(counters.notes_read).toBe(1);
+  });
+
+  test("follows pages", async () => {
+    const { url } = await serveNotes({ pageSize: 3 });
+    const all = await connect({ transport: { type: "http", url }, scope: readOnlyScope });
+    expect(all.tools.length + all.skipped.length).toBe(14);
+  });
+
+  test("stops at the page limit when a server never ends the list", async () => {
+    const { url } = await serveNotes({ endless: true });
+    const capped = await connect({ transport: { type: "http", url }, scope: "notes:read" });
+    expect(capped.tools).toHaveLength(20);
+  });
+
+  test("skips a second tool with the same name", async () => {
+    const { url } = await serveNotes({ duplicate: true });
+    const mcp = await connect({ transport: { type: "http", url }, scope: readOnlyScope });
+    expect(mcp.tools.filter((t) => t.name === "notes_read")).toHaveLength(1);
+    expect(mcp.skipped).toContainEqual({ name: "notes_read", reason: "duplicate name" });
+  });
+
+  test.each([
+    ["a body that streams past the limit", { "content-type": "application/json" }, false],
+    ["a body that declares a size over the limit", { "content-type": "application/json", "content-length": "5000000" }, true],
+  ])("refuses %s", async (_name, headers, declared) => {
+    httpServer = createServer((_req, res) => {
+      res.writeHead(200, headers);
+      if (declared) res.end("{}");
+      else {
+        res.write(" ".repeat(5000));
+        res.end(" ".repeat(5000));
+      }
+    });
+    await new Promise<void>((resolve) => httpServer?.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(httpServer?.address() as AddressInfo).port}/mcp`;
+    await expect(connectMcpTools({ transport: { type: "http", url }, scope: "notes:read", maxResponseBytes: 1000 })).rejects.toThrow(/size limit/);
+  });
+
+  test("gives up on a server that never answers", async () => {
+    httpServer = createServer(() => undefined);
+    await new Promise<void>((resolve) => httpServer?.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(httpServer?.address() as AddressInfo).port}/mcp`;
+    const started = Date.now();
+    await expect(connectMcpTools({ transport: { type: "http", url }, scope: "notes:read", loadTimeoutMs: 300 })).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   test("refuses a remote http URL and a URL with a password", async () => {

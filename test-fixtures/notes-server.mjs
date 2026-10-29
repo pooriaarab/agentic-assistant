@@ -10,14 +10,30 @@ const TOOLS = [
   { name: "big", description: "Return a huge text", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "boom", description: "Always fail", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "img", description: "Return an image", inputSchema: object({}), annotations: { readOnlyHint: true } },
+  { name: "slow", description: "Answer after two seconds", inputSchema: object({}), annotations: { readOnlyHint: true } },
+  { name: "structured", description: "Return structured content only", inputSchema: object({}), annotations: { readOnlyHint: true } },
+  { name: "pid", description: "Return the server process id", inputSchema: object({}), annotations: { readOnlyHint: true } },
+  { name: "long_text", description: "x".repeat(5000), inputSchema: object({ id: { type: "string", description: "y".repeat(5000) } }), annotations: { readOnlyHint: true } },
+  { name: "with_pattern", description: "A schema with a regular expression", inputSchema: object({ q: { type: "string", pattern: "^(a|a)*$" } }), annotations: { readOnlyHint: true } },
+  { name: "huge_schema", description: "A schema that is too large", inputSchema: object(Object.fromEntries(Array.from({ length: 800 }, (_, i) => [`field_number_${i}`, { type: "string" }]))), annotations: { readOnlyHint: true } },
   { name: "stats", description: "Read the call counters", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "bad name!", description: "A name the assistant refuses", inputSchema: object({}) },
   { name: "bad_schema", description: "A schema that does not compile", inputSchema: { type: "object", properties: { a: { type: "nonsense" } } } },
 ];
 
-export function createNotesServer(counters = {}) {
+export function createNotesServer(counters = {}, { pageSize, endless, duplicate } = {}) {
   const server = new Server({ name: "notes", version: "1.0.0" }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    if (endless) {
+      const page = Number(request.params?.cursor ?? 0);
+      return { tools: [{ name: `page_tool_${page}`, description: "d", inputSchema: object({}) }], nextCursor: String(page + 1) };
+    }
+    if (duplicate) return { tools: [...TOOLS, TOOLS[0]] };
+    if (!pageSize) return { tools: TOOLS };
+    const start = Number(request.params?.cursor ?? 0);
+    const end = start + pageSize;
+    return { tools: TOOLS.slice(start, end), ...(end < TOOLS.length ? { nextCursor: String(end) } : {}) };
+  });
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
     counters[name] = (counters[name] ?? 0) + 1;
@@ -34,6 +50,15 @@ export function createNotesServer(counters = {}) {
         return { isError: true, content: [{ type: "text", text: "driver said: postgres://app:s3cr3t@db/notes" }] };
       case "img":
         return { content: [{ type: "image", data: "AAAA", mimeType: "image/png" }, { type: "text", text: "caption" }] };
+      case "slow":
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return text("late");
+      case "structured":
+        return { content: [], structuredContent: { a: 1 } };
+      case "pid":
+        return text(String(process.pid));
+      case "long_text":
+        return text("ok");
       case "stats":
         return text(JSON.stringify(counters));
       default:

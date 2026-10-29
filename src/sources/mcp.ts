@@ -31,6 +31,10 @@ export interface ConnectMcpOptions {
   maxDescriptionChars?: number;
   /** Time to wait for one tool call. Default 30000. */
   callTimeoutMs?: number;
+  /** Time to connect and list every tool, all pages together. Default 30000. */
+  loadTimeoutMs?: number;
+  /** Most bytes to read from one HTTP response. Default 4000000. Stdio is limited by the SDK. */
+  maxResponseBytes?: number;
 }
 
 export interface McpTools {
@@ -41,13 +45,60 @@ export interface McpTools {
 }
 
 const MAX_PAGES = 20;
+/** Longest schema, as JSON text, that is passed to the model. */
+const MAX_SCHEMA_CHARS = 20_000;
 
-function makeTransport(config: McpTransportConfig): Transport {
+function positive(name: string, value: number | undefined, fallback: number): number {
+  const chosen = value ?? fallback;
+  if (!Number.isInteger(chosen) || chosen <= 0) throw new RangeError(`${name} must be a positive integer`);
+  return chosen;
+}
+
+/** A fetch that stops reading a response after `limit` bytes. */
+function boundedFetch(limit: number): typeof fetch {
+  return async (input, init) => {
+    const response = await fetch(input, init);
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > limit) {
+      await response.body?.cancel();
+      throw new Error(`the tool server sent a response over the size limit of ${limit} bytes`);
+    }
+    if (response.body === null) return response;
+    let seen = 0;
+    const counted = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          seen += chunk.byteLength;
+          if (seen > limit) controller.error(new Error(`the tool server sent a response over the size limit of ${limit} bytes`));
+          else controller.enqueue(chunk);
+        },
+      }),
+    );
+    return new Response(counted, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
+}
+
+/** Copies a schema with its free text cut, so it cannot carry a long instruction to the model. */
+function limitSchemaText(value: unknown, max: number): unknown {
+  if (Array.isArray(value)) return value.map((item) => limitSchemaText(item, max));
+  if (typeof value !== "object" || value === null) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "examples") continue;
+    out[key] = (key === "description" || key === "title" || key === "$comment") && typeof child === "string" ? cut(child, max) : limitSchemaText(child, max);
+  }
+  return out;
+}
+
+function makeTransport(config: McpTransportConfig, maxResponseBytes: number): Transport {
   if (config.type === "stdio") {
     return new StdioClientTransport({ command: config.command, args: config.args, env: config.env, cwd: config.cwd, stderr: "ignore" });
   }
   const { url } = checkBaseUrl(config.url);
-  return new StreamableHTTPClientTransport(url, config.headers ? { requestInit: { headers: config.headers } } : undefined);
+  return new StreamableHTTPClientTransport(url, {
+    fetch: boundedFetch(maxResponseBytes),
+    ...(config.headers ? { requestInit: { headers: config.headers } } : {}),
+  });
 }
 
 /** Cuts text at `max` characters and says how much was cut. */
@@ -70,44 +121,51 @@ function flatten(result: CallResult, max: number): string {
  * left out. Tools with a bad name, schema, or scope are skipped, not loaded.
  */
 export async function connectMcpTools(options: ConnectMcpOptions): Promise<McpTools> {
-  const maxOutput = options.maxOutputChars ?? 32_768;
-  const maxTools = options.maxTools ?? 200;
-  const maxDescription = options.maxDescriptionChars ?? 1000;
+  const maxOutput = positive("maxOutputChars", options.maxOutputChars, 32_768);
+  const maxTools = positive("maxTools", options.maxTools, 200);
+  const maxDescription = positive("maxDescriptionChars", options.maxDescriptionChars, 1000);
+  const callTimeout = positive("callTimeoutMs", options.callTimeoutMs, 30_000);
+  const loadTimeout = positive("loadTimeoutMs", options.loadTimeoutMs, 30_000);
+  const maxResponseBytes = positive("maxResponseBytes", options.maxResponseBytes, 4_000_000);
   const prefix = options.prefix ?? "";
   const client = new Client({ name: "agentic-assistant", version: VERSION });
-  await client.connect(makeTransport(options.transport));
+  const loading = AbortSignal.timeout(loadTimeout);
   try {
-    const listed: McpToolInfo[] = [];
-    const schemas = new Map<string, Record<string, unknown>>();
+    await client.connect(makeTransport(options.transport, maxResponseBytes), { signal: loading, timeout: loadTimeout });
+    const listed: (McpToolInfo & { inputSchema: unknown })[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await client.listTools(cursor === undefined ? undefined : { cursor });
-      for (const tool of response.tools) {
-        listed.push(tool);
-        schemas.set(tool.name, tool.inputSchema as Record<string, unknown>);
-      }
+      const response = await client.listTools(cursor === undefined ? undefined : { cursor }, { signal: loading, timeout: loadTimeout });
+      listed.push(...response.tools);
       cursor = response.nextCursor;
       if (cursor === undefined) break;
     }
 
     const tools: ToolDefinition[] = [];
     const skipped: McpTools["skipped"] = [];
+    const seen = new Set<string>();
     for (const info of listed) {
+      if (seen.has(info.name)) {
+        skipped.push({ name: info.name, reason: "duplicate name" });
+        continue;
+      }
+      seen.add(info.name);
       if (tools.length >= maxTools) {
         skipped.push({ name: info.name, reason: "too many tools" });
         continue;
       }
       try {
+        if (JSON.stringify(info.inputSchema).length > MAX_SCHEMA_CHARS) throw new Error("input schema is too large");
         const scope = typeof options.scope === "function" ? options.scope(info) : options.scope;
         const definition: ToolDefinition = {
           name: `${prefix}${info.name}`,
           description: cut(info.description ?? "", maxDescription),
-          inputSchema: schemas.get(info.name) ?? {},
+          inputSchema: limitSchemaText(info.inputSchema, maxDescription) as Record<string, unknown>,
           scope,
           handler: async (input, context) => {
             const result = (await client.callTool({ name: info.name, arguments: input }, undefined, {
               signal: context.signal,
-              timeout: options.callTimeoutMs ?? 30_000,
+              timeout: callTimeout,
             })) as CallResult;
             const text = flatten(result, maxOutput);
             if (result.isError) throw new Error(text === "" ? "the tool reported an error" : text);

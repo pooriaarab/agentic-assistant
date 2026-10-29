@@ -144,9 +144,9 @@ function serialize(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Quotes tool output for the model. A forged opening or closing tag in the text is neutralized. */
+/** Quotes tool output for the model. Every `<` in the text is escaped, so no tag can be forged. */
 function quoteToolOutput(tool: string, text: string): string {
-  return `<tool_output tool="${tool}">\n${text.replace(/<(\/?tool_output)/gi, "&lt;$1")}\n</tool_output>`;
+  return `<tool_output tool="${tool}">\n${text.replaceAll("<", "&lt;")}\n</tool_output>`;
 }
 
 function limitText(text: string, max: number): string {

@@ -33,6 +33,19 @@ const MAX_ERROR_CHARS = 200;
 type Validate = (input: unknown) => boolean;
 type ValidateWithErrors = Validate & { errors?: { instancePath: string; message?: string; params: Record<string, unknown> }[] | null };
 
+/**
+ * Ajv turns a `pattern` into a backtracking regular expression. A schema from another server could
+ * hold one that takes hours on a short input, and the check runs on the host's event loop. So a
+ * schema may not use `pattern` or `patternProperties`.
+ */
+function usesRegexKeyword(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(usesRegexKeyword);
+  if (typeof value !== "object" || value === null) return false;
+  return Object.entries(value).some(
+    ([key, child]) => key === "patternProperties" || (key === "pattern" && typeof child === "string") || usesRegexKeyword(child),
+  );
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: ToolDefinition; validate: ValidateWithErrors }>();
   // One validator per registry, so an `$id` in one tool's schema cannot clash with another registry's.
@@ -43,6 +56,9 @@ export class ToolRegistry {
     if (this.tools.has(tool.name)) throw new Error(`tool "${tool.name}" is already registered`);
     parseScope(tool.scope);
     if (tool.inputSchema?.type !== "object") throw new Error(`tool "${tool.name}" needs an input schema with type "object"`);
+    if (usesRegexKeyword(tool.inputSchema)) {
+      throw new Error(`tool "${tool.name}" has an input schema with a regular expression (pattern), which is not allowed`);
+    }
     // A schema from another server may name a draft or an id that this validator does not know.
     const { $schema: _draft, $id: _id, ...schema } = tool.inputSchema;
     let validate: ValidateWithErrors;
