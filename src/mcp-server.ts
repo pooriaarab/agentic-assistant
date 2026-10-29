@@ -2,6 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { runChat, type Setup } from "./chat.js";
+import { provenanceLabel, provenanceMarker, type Provenance } from "./provenance.js";
 import { VERSION } from "./version.js";
 
 const MAX_MESSAGE_CHARS = 10_000;
@@ -39,17 +40,25 @@ export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal): 
     // A listener never fires for a signal that already fired, so a call that starts after shutdown stops here.
     if (extra.signal.aborted || shutdown?.aborted) stop();
     let reply = "";
-    const toolCalls: { name: string; isError: boolean; denied?: string }[] = [];
-    let outcome: { reason: string; totals: unknown } | undefined;
+    const toolCalls: { name: string; isError: boolean; denied?: string; provenance?: Provenance }[] = [];
+    let outcome: { reason: string; totals: unknown; provenance?: Provenance } | undefined;
     for await (const event of runChat(setup, [{ role: "user", content: [{ type: "text", text: message }] }], call.signal)) {
       if (event.type === "text_delta") reply += event.text;
       else if (event.type === "turn_start") reply = "";
-      else if (event.type === "tool_result") toolCalls.push({ name: event.name, isError: event.isError, ...(event.denied ? { denied: event.denied } : {}) });
-      else if (event.type === "done") outcome = { reason: event.reason, totals: event.totals };
+      else if (event.type === "tool_result") toolCalls.push({ name: event.name, isError: event.isError, ...(event.denied ? { denied: event.denied } : {}), ...(event.provenance ? { provenance: event.provenance } : {}) });
+      else if (event.type === "done") outcome = { reason: event.reason, totals: event.totals, provenance: event.provenance };
     }
     extra.signal.removeEventListener("abort", stop);
     shutdown?.removeEventListener("abort", stop);
-    const result = { machineMade: true, reply, reason: outcome?.reason ?? "unknown", toolCalls, totals: outcome?.totals };
+    const provenance = outcome?.provenance;
+    const result = {
+      machineMade: true,
+      reply,
+      reason: outcome?.reason ?? "unknown",
+      toolCalls,
+      totals: outcome?.totals,
+      ...(provenance ? { provenance, label: provenanceLabel(provenance), marker: provenanceMarker(provenance) } : {}),
+    };
     return { ...(outcome?.reason === "end_turn" ? {} : { isError: true }), content: [{ type: "text" as const, text: JSON.stringify(result) }] };
   });
   return server;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { provenanceLabel } from "./provenance.js";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
@@ -248,6 +249,7 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
     case "done":
       endText();
       io.err(`done: ${event.reason}. tokens in ${event.totals.inputTokens}, out ${event.totals.outputTokens}. cost $${event.totals.costUsd.toFixed(6)} (estimate)${event.error ? `. error: ${oneLine(event.error)}` : ""}`);
+      if (event.provenance !== undefined) io.err(oneLine(provenanceLabel(event.provenance), 300));
       break;
     default:
       break;
