@@ -8,8 +8,11 @@ Changed
 
 - The demo page sets `color-scheme: light dark`, so its system-color fallbacks follow the user's dark mode.
 - A test fails if a hard-coded hex color returns to the demo page style. This does not change the package.
-- An npm `overrides` entry sets `zod` to `^4.6.7` for this repo, for GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating oversized constrained collections, fixed in 4.6.6 and later). The overrides entry applies only to this repo. An install of `agentic-assistant` gets the zod that each dependency allows. The optional peer `agentic-design` 0.3.x can bring zod 3 into your project, so run `npm audit` after you upgrade.
 - The MCP start test with no model key is an end-to-end test now, and the README says so. This does not change the package.
+
+Security
+
+- An npm `overrides` entry sets `zod` to `^4.6.7`, for GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating oversized constrained collections, fixed in 4.6.6 and later). The entry applies only to this repo. An install of `agentic-assistant` gets the zod that each dependency allows. The optional peer `agentic-design` 0.3.x can bring zod 3 into your project, so run `npm audit` after you upgrade.
 
 ## 0.5.1
 
