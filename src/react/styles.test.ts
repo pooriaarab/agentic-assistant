@@ -75,10 +75,21 @@ describe("panel styles", () => {
 
   // System colors cannot be read as hex, so this pins each fallback to one that contrasts with Canvas.
   test("fallbacks without the tokens are readable system colors", () => {
-    const backgrounds = ["bg", "machine-bg", "card-bg", "warn-bg", "accent-fg"];
-    for (const [key, value] of Object.entries(fallback)) {
-      expect(value, key).toBe(backgrounds.includes(key) ? "Canvas" : key === "accent" || key === "focus" || key === "danger" ? "LinkText" : "CanvasText");
-    }
+    expect(fallback).toEqual({
+      bg: "Canvas",
+      "machine-bg": "Canvas",
+      "card-bg": "Canvas",
+      "warn-bg": "Canvas",
+      "accent-fg": "Canvas",
+      fg: "CanvasText",
+      muted: "CanvasText",
+      border: "CanvasText",
+      "machine-fg": "CanvasText",
+      "warn-fg": "CanvasText",
+      accent: "LinkText",
+      focus: "LinkText",
+      danger: "LinkText",
+    });
   });
 
   test("buttons meet the minimum target size, and focus is visible", () => {
