@@ -34,6 +34,7 @@ Flags for chat and mcp:
   --approve <ask|deny>      ask: question a person on the terminal (chat only). Default deny.
   --provider <name>         anthropic (default), openai-compatible, or scripted (for tests).
   --model <id>              Model id. Default for anthropic: claude-sonnet-5-5.
+  --fallback-model <id>     A second model on the same provider. It answers once when --model refuses or fails.
   --base-url <url>          Endpoint. Required for openai-compatible. https, or localhost.
   --use-default-endpoint    Call api.anthropic.com, a US-hosted endpoint. Anthropic only.
   --api-key-env <NAME>      Read the API key from this environment variable. Keys never go in arguments.
@@ -61,6 +62,7 @@ const OPTIONS = {
   approve: { type: "string" },
   provider: { type: "string" },
   model: { type: "string" },
+  "fallback-model": { type: "string" },
   "base-url": { type: "string" },
   "use-default-endpoint": { type: "boolean" },
   "api-key-env": { type: "string" },
@@ -146,6 +148,7 @@ export function parseCli(argv: string[]): Parsed {
     toolRisk: risk as ToolRisk,
     provider,
     model: values.model,
+    fallbackModel: values["fallback-model"],
     baseUrl: values["base-url"],
     useDefaultEndpoint: values["use-default-endpoint"] ?? false,
     apiKeyEnv: values["api-key-env"],
@@ -223,6 +226,9 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
       break;
     case "turn_end":
       endText();
+      if (event.answeredBy.fallback) {
+        io.err(`fallback model answered: ${oneLine(event.answeredBy.model, 100)} (first model: ${event.answeredBy.fallbackFor ?? "unknown"})`);
+      }
       break;
     case "tool_call":
       endText();

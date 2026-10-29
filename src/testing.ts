@@ -14,7 +14,7 @@ export interface ScriptedTurn {
  */
 export class ScriptedProvider implements ModelProvider {
   readonly name = "scripted";
-  readonly model = "scripted-1";
+  readonly model: string = "scripted-1";
   readonly requests: ModelRequest[] = [];
   private next = 0;
 

@@ -16,6 +16,7 @@ import {
   type ContentBlock,
   type Message,
   type ModelProvider,
+  type AnsweredBy,
   type StopReason,
   type Usage,
 } from "./types.js";
@@ -90,7 +91,7 @@ export type AssistantEvent =
       detail?: string;
       actor: Actor;
     }
-  | { type: "turn_end"; turn: number; usage: Usage; totals: RunTotals }
+  | { type: "turn_end"; turn: number; usage: Usage; totals: RunTotals; /** The model that answered this turn. */ answeredBy: AnsweredBy }
   | { type: "done"; reason: DoneReason; totals: RunTotals; actor: Actor; messages: Message[]; error?: string };
 
 const DEFAULT_MAX_TURNS = 8;
@@ -261,7 +262,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       yield finish(limitedBy);
       return;
     }
-    let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage } | undefined;
+    let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage; answeredBy?: AnsweredBy } | undefined;
     try {
       for await (const event of provider.stream({
         system,
@@ -291,7 +292,13 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         1_000_000;
     }
     messages.push({ role: "assistant", content: final.content });
-    yield { type: "turn_end", turn, usage: final.usage, totals: { ...totals } };
+    yield {
+      type: "turn_end",
+      turn,
+      usage: final.usage,
+      totals: { ...totals },
+      answeredBy: final.answeredBy ?? { provider: provider.name, model: provider.model, fallback: false },
+    };
 
     if (final.stopReason !== "tool_use") {
       yield finish(DONE_FOR_STOP[final.stopReason] ?? "provider_stop");

@@ -99,7 +99,7 @@ describe("assistant panel", () => {
     expect(await screen.findByText("Hello there")).toBeTruthy();
     expect(container.querySelectorAll(".aa-assistant")).toHaveLength(1);
     expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("true");
-    feed.push({ type: "turn_end", turn: 1, usage: { inputTokens: 1, outputTokens: 1 }, totals: { inputTokens: 1, outputTokens: 1, costUsd: 0 } });
+    feed.push({ type: "turn_end", turn: 1, usage: { inputTokens: 1, outputTokens: 1 }, totals: { inputTokens: 1, outputTokens: 1, costUsd: 0 }, answeredBy: { provider: "scripted", model: "scripted-1", fallback: false } });
     feed.push(done());
     feed.end();
     await waitFor(() => expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("false"));

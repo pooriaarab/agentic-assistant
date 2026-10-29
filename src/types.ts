@@ -34,9 +34,19 @@ export interface ModelRequest {
   signal?: AbortSignal;
 }
 
+/** Which model gave an answer. A provider that picks between models sets it on the final message. */
+export interface AnsweredBy {
+  provider: string;
+  model: string;
+  /** True when a fallback model answered. */
+  fallback: boolean;
+  /** Why the first model did not answer. Set only when `fallback` is true. */
+  fallbackFor?: "refusal" | "error";
+}
+
 export type ModelEvent =
   | { type: "text_delta"; text: string }
-  | { type: "message"; content: ContentBlock[]; stopReason: StopReason; usage: Usage };
+  | { type: "message"; content: ContentBlock[]; stopReason: StopReason; usage: Usage; answeredBy?: AnsweredBy };
 
 /** Prices in US dollars per million tokens. */
 export interface Pricing {

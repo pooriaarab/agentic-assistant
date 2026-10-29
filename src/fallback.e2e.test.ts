@@ -1,0 +1,192 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, test } from "vitest";
+import { FallbackProvider, OpenAICompatibleProvider, ToolRegistry, createPrincipal, runAssistant, type AssistantEvent, type ModelProvider, type ModelRequest } from "./index.js";
+import { runCli, type CliIo } from "./cli.js";
+import { ScriptedProvider } from "./testing.js";
+import { serveNotes } from "../test-fixtures/notes-http.mjs";
+
+// Ways the fallback can fail. Each one is a case below.
+// 1. A refusal or an error stops the run when a fallback model is set.
+// 2. The fallback runs when the first model answered well, or runs twice.
+// 3. The event does not say which model answered.
+// 4. Text from the refused turn reaches the user before the fallback text.
+// 5. A refusal from the fallback is shown as success.
+// 6. Tokens of the refused ask are not counted, so a cap sees too little.
+// 7. A stopped run starts the fallback.
+// 8. A cost cap uses the cheaper price when the dearer model answers.
+// 9. The CLI flag does not reach a real endpoint.
+
+const message = (text: string) => [{ role: "user" as const, content: [{ type: "text" as const, text }] }];
+
+class Named extends ScriptedProvider {
+  constructor(
+    readonly model: string,
+    ...rest: ConstructorParameters<typeof ScriptedProvider>
+  ) {
+    super(...rest);
+  }
+}
+
+class Broken implements ModelProvider {
+  readonly name = "broken";
+  readonly model = "broken-1";
+  calls = 0;
+  // eslint-disable-next-line require-yield
+  async *stream(request: ModelRequest): AsyncGenerator<never> {
+    this.calls++;
+    if (request.signal?.aborted) throw new Error("aborted");
+    throw new Error("503 from the model");
+  }
+}
+
+async function run(provider: ModelProvider, extra: Partial<Parameters<typeof runAssistant>[0]> = {}): Promise<AssistantEvent[]> {
+  const events: AssistantEvent[] = [];
+  const principal = createPrincipal({ id: "agent:a", kind: "agent_of_human", parentId: "human:ana", scopes: [] });
+  for await (const event of runAssistant({ provider, registry: new ToolRegistry(), principal, messages: message("go"), ...extra })) events.push(event);
+  return events;
+}
+const done = (events: AssistantEvent[]) => events.find((e): e is Extract<AssistantEvent, { type: "done" }> => e.type === "done");
+const turn = (events: AssistantEvent[]) => events.find((e): e is Extract<AssistantEvent, { type: "turn_end" }> => e.type === "turn_end");
+const text = (events: AssistantEvent[]) => events.flatMap((e) => (e.type === "text_delta" ? [e.text] : [])).join("");
+
+describe("FallbackProvider", () => {
+  test("a refusal on the first model is answered by the fallback, and the event names it", async () => {
+    const primary = new Named("big-1", [{ text: "partial ", stopReason: "refusal", usage: { inputTokens: 20, outputTokens: 2 } }]);
+    const fallback = new Named("small-1", [{ text: "Here is the answer.", usage: { inputTokens: 30, outputTokens: 4 } }]);
+    const events = await run(new FallbackProvider(primary, fallback));
+    expect(done(events)?.reason).toBe("end_turn");
+    expect(text(events)).toBe("Here is the answer.");
+    expect(turn(events)?.answeredBy).toEqual({ provider: "scripted", model: "small-1", fallback: true, fallbackFor: "refusal" });
+    expect(primary.requests).toHaveLength(1);
+    expect(fallback.requests).toHaveLength(1);
+    expect(fallback.requests[0]?.messages).toEqual(primary.requests[0]?.messages);
+    // Tokens of both asks count.
+    expect(done(events)?.totals).toMatchObject({ inputTokens: 50, outputTokens: 6 });
+  });
+
+  test("an error on the first model is answered by the fallback", async () => {
+    const primary = new Broken();
+    const fallback = new Named("small-1", [{ text: "ok" }]);
+    const events = await run(new FallbackProvider(primary, fallback));
+    expect(done(events)?.reason).toBe("end_turn");
+    expect(turn(events)?.answeredBy).toMatchObject({ model: "small-1", fallback: true, fallbackFor: "error" });
+    expect(primary.calls).toBe(1);
+  });
+
+  test("a good first answer never touches the fallback, and names the first model", async () => {
+    const primary = new Named("big-1", [{ text: "fine" }]);
+    const fallback = new Named("small-1", []);
+    const events = await run(new FallbackProvider(primary, fallback));
+    expect(text(events)).toBe("fine");
+    expect(turn(events)?.answeredBy).toEqual({ provider: "scripted", model: "big-1", fallback: false });
+    expect(fallback.requests).toHaveLength(0);
+  });
+
+  test("the fallback is tried once: a refusal from it stops the run as a refusal", async () => {
+    const primary = new Named("big-1", [{ text: "no", stopReason: "refusal" }]);
+    const fallback = new Named("small-1", [{ text: "also no", stopReason: "refusal" }, { text: "third" }]);
+    const events = await run(new FallbackProvider(primary, fallback));
+    expect(done(events)?.reason).toBe("refusal");
+    expect(fallback.requests).toHaveLength(1);
+  });
+
+  test("two errors stop the run with provider_error", async () => {
+    const events = await run(new FallbackProvider(new Broken(), new Broken()));
+    expect(done(events)).toMatchObject({ reason: "provider_error", error: "503 from the model" });
+  });
+
+  test("a stopped run does not start the fallback", async () => {
+    const controller = new AbortController();
+    const fallback = new Named("small-1", [{ text: "late" }]);
+    const failing: ModelProvider = {
+      name: "slow",
+      model: "slow-1",
+      // eslint-disable-next-line require-yield
+      async *stream() {
+        controller.abort();
+        throw new Error("cancelled");
+      },
+    };
+    const events = await run(new FallbackProvider(failing, fallback), { signal: controller.signal });
+    expect(done(events)?.reason).toBe("aborted");
+    expect(fallback.requests).toHaveLength(0);
+  });
+
+  test("a cost cap uses the higher price of the two models", async () => {
+    const primary = new Named("big-1", [{ text: "x", stopReason: "refusal", usage: { inputTokens: 1000, outputTokens: 0 } }], { inputPerMTok: 1, outputPerMTok: 1 });
+    const fallback = new Named("small-1", [{ text: "y", usage: { inputTokens: 1000, outputTokens: 0 } }], { inputPerMTok: 10, outputPerMTok: 10 });
+    const provider = new FallbackProvider(primary, fallback);
+    expect(provider.pricing).toEqual({ inputPerMTok: 10, outputPerMTok: 10 });
+    const events = await run(provider);
+    expect(done(events)?.totals.costUsd).toBeCloseTo(0.02, 10);
+  });
+
+  test("one model without a price leaves the pair without a price", () => {
+    const priced = new Named("a", [], { inputPerMTok: 1, outputPerMTok: 1 });
+    expect(new FallbackProvider(priced, new Named("b", [])).pricing).toBeUndefined();
+  });
+});
+
+describe("--fallback-model", () => {
+  let server: Server | undefined;
+  let notes: Awaited<ReturnType<typeof serveNotes>> | undefined;
+  afterEach(async () => {
+    server?.closeAllConnections();
+    server?.close();
+    await notes?.close();
+  });
+
+  async function chat(extra: string[]): Promise<{ code: number; out: string; err: string; asked: string[] }> {
+    const asked: string[] = [];
+    server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (d) => (raw += d));
+      req.on("end", () => {
+        const model = JSON.parse(raw).model as string;
+        asked.push(model);
+        if (model === "first-model") {
+          res.writeHead(500).end("down");
+          return;
+        }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "from the backup" }, finish_reason: "stop" }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2 } })}\n\ndata: [DONE]\n\n`);
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    notes = await serveNotes();
+    let out = "";
+    let err = "";
+    const io: CliIo = {
+      out: (t) => void (out += t),
+      err: (t) => void (err += `${t}\n`),
+      env: {},
+      readFile: () => "",
+      readStdin: async () => "",
+      isTTY: false,
+      ask: async () => "",
+    };
+    const code = await runCli(
+      ["chat", "--tools", notes.url, "--scope", "notes:read", "--tool-scope", "notes:read", "--provider", "openai-compatible", "--base-url", `http://127.0.0.1:${port}`, "--model", "first-model", ...extra, "go"],
+      io,
+    );
+    return { code, out, err, asked };
+  }
+
+  test("the CLI retries on the fallback model and says so", async () => {
+    const result = await chat(["--fallback-model", "backup-model"]);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("from the backup");
+    expect(result.err).toContain("fallback model answered: backup-model (first model: error)");
+    expect(result.asked).toEqual(["first-model", "backup-model"]);
+  });
+
+  test("without the flag the same failure stops the run", async () => {
+    const result = await chat([]);
+    expect(result.code).toBe(1);
+    expect(result.asked).toEqual(["first-model"]);
+  });
+});
