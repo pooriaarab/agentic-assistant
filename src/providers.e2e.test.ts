@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  DATA_NOTICE,
   AnthropicProvider,
   OpenAICompatibleProvider,
   ToolRegistry,
@@ -124,7 +125,7 @@ describe("Anthropic adapter", () => {
     const [first, second] = seen;
     expect(first?.url).toBe("/v1/messages");
     expect(JSON.stringify(first?.headers)).toContain("test-key");
-    expect(first?.body).toMatchObject({ model: "claude-sonnet-5-5", stream: true, system: "You are a test assistant." });
+    expect(first?.body).toMatchObject({ model: "claude-sonnet-5-5", stream: true, system: `You are a test assistant.\n\n${DATA_NOTICE}` });
     expect(first?.body).not.toHaveProperty("temperature");
     expect(first?.body.tools).toEqual([
       { name: "notes_read", description: "Read a note", input_schema: { type: "object", properties: { id: { type: "string" } } } },
@@ -136,7 +137,7 @@ describe("Anthropic adapter", () => {
     ]);
     expect(second?.body.messages.at(-1)).toEqual({
       role: "user",
-      content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "note body", is_error: false }],
+      content: [{ type: "tool_result", tool_use_id: "toolu_1", content: '<tool_output tool="notes_read">\nnote body\n</tool_output>', is_error: false }],
     });
   });
 
@@ -152,6 +153,34 @@ describe("Anthropic adapter", () => {
     expect(() => new AnthropicProvider({ apiKey: "k", useDefaultEndpoint: true })).not.toThrow();
     expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "https://models.example.eu" })).not.toThrow();
     expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "http://models.example.eu" })).toThrow(/https/);
+  });
+
+  test("the default endpoint cannot be redirected by the environment", () => {
+    const saved = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = "http://evil.example";
+    try {
+      const provider = new AnthropicProvider({ apiKey: "k", useDefaultEndpoint: true }) as unknown as { client: { baseURL: string } };
+      expect(provider.client.baseURL).toBe("https://api.anthropic.com");
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = saved;
+    }
+  });
+
+  test("reasoning blocks from another provider are not sent", async () => {
+    const { url, seen } = await serve(() => ({ chunks: anthropicTurn([{ type: "text", parts: ["ok"] }], "end_turn") }));
+    const provider = new AnthropicProvider({ apiKey: "k", baseUrl: url });
+    const events = [];
+    for await (const event of provider.stream({
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        { role: "assistant", content: [{ type: "provider_block", provider: "other", raw: { type: "thinking", thinking: "x", signature: "s" } }, { type: "text", text: "yo" }] },
+        { role: "user", content: [{ type: "text", text: "again" }] },
+      ],
+      tools: [],
+      maxOutputTokens: 100,
+    })) events.push(event);
+    expect(JSON.stringify(seen[0]?.body.messages)).not.toContain("thinking");
   });
 
   test("a missing or empty key is refused", () => {
@@ -201,10 +230,10 @@ describe("OpenAI-compatible adapter", () => {
       function: { name: "notes_read", description: "Read a note", parameters: { type: "object", properties: { id: { type: "string" } } } },
     });
     expect(second?.body.messages).toEqual([
-      { role: "system", content: "You are a test assistant." },
+      { role: "system", content: `You are a test assistant.\n\n${DATA_NOTICE}` },
       { role: "user", content: "read n1" },
       { role: "assistant", content: "Reading now.", tool_calls: [{ id: "call_9", type: "function", function: { name: "notes_read", arguments: '{"id":"n1"}' } }] },
-      { role: "tool", tool_call_id: "call_9", content: "note body" },
+      { role: "tool", tool_call_id: "call_9", content: '<tool_output tool="notes_read">\nnote body\n</tool_output>' },
     ]);
   });
 
@@ -235,12 +264,18 @@ describe("OpenAI-compatible adapter", () => {
 
   test("a stream of comment lines is cut at the size limit", async () => {
     const { url } = await serve(() => ({ chunks: [`: ${"ping ".repeat(30)}\n`, `: ${"ping ".repeat(30)}\n`] }));
-    const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m", maxResponseChars: 100 }));
+    const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m", maxResponseBytes: 100 }));
     expect((await run()).at(-1)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("size limit") });
   });
 
   test.each([[Number.NaN], [0], [-5], [1.5]])("a bad response limit %j is refused", (limit) => {
-    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://localhost:1/v1", model: "m", maxResponseChars: limit })).toThrow(/maxResponseChars/);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://localhost:1/v1", model: "m", maxResponseBytes: limit })).toThrow(/maxResponseBytes/);
+  });
+
+  test("a URL with a query or a fragment is refused", () => {
+    for (const baseUrl of ["https://models.example.eu/v1#x", "https://models.example.eu/v1?key=1"]) {
+      expect(() => new OpenAICompatibleProvider({ baseUrl, model: "m", apiKey: "k" })).toThrow(/query string or a fragment/);
+    }
   });
 
   test("a URL with credentials is refused without echoing them", () => {

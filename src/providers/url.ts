@@ -15,6 +15,9 @@ export function checkBaseUrl(baseUrl: string): { url: URL; text: string } {
   if (url.username !== "" || url.password !== "") {
     throw new ProviderError("baseUrl must not carry credentials; pass apiKey instead");
   }
+  if (url.search !== "" || url.hash !== "") {
+    throw new ProviderError("baseUrl must not carry a query string or a fragment");
+  }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url))) {
     throw new ProviderError("baseUrl must use https, except for localhost");
   }

@@ -16,6 +16,13 @@ for await (const event of runAssistant({ provider: new AnthropicProvider({ useDe
 }
 ```
 
+## Load tools from an MCP server
+
+```ts
+const mcp = await connectMcpTools({ transport: { type: "stdio", command: "node", args: ["server.js"] }, scope: "notes:read" });
+registry.registerAll(mcp.tools);
+```
+
 ## Test without a model
 
 Use `ScriptedProvider` from `agentic-assistant/testing`. Give it one scripted turn per model call.
