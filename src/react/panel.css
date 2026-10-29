@@ -2,8 +2,8 @@
    agentic-design/tokens.css once on the page. Override --aa-* on .agd-assistant or a parent to match your app.
    Without the tokens, each variable falls back to a system color, so focus and borders stay visible.
    The look is calm. Cards have soft borders. The text field, buttons, approval prompt, and warnings have a strong edge.
-   Space, radius, type, control size, and shadow come from the --agd-* tokens. Each has a fallback. Each text, edge, and focus pair meets WCAG 2.2 AA contrast
-   in light and dark; src/react/styles.test.ts checks them.
+   Space, radius, type, control size, and shadow come from the --agd-* tokens. Each has a fallback.
+   Each text, edge, and focus pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks them.
    --aa-border is decoration only and is not checked, so do not use it for an edge people must see.
    No remote fonts or images. */
 .agd-assistant {
