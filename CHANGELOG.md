@@ -4,7 +4,7 @@
 
 Changed
 
-- The chat panel has the agentic-design 0.5 calm look: soft borders on cards and messages, a strong edge only on the text field and buttons, the `--agd-*` space, radius, and type scale, a 2px focus ring (was 3px), and a dashed edge on a disabled button.
+- The chat panel has the agentic-design 0.5 calm look: soft borders on cards and messages, a strong edge only on the text field and buttons, the `--agd-*` space, radius, type scale, control-size, and shadow tokens (each with a fallback), a 2px focus ring (was 3px), and a dashed edge on a disabled button.
 - BREAKING: panel class names use the `agd-` prefix. Your `.aa-*` overrides stop applying without an error. Migration: `.aa-panel` is now `.agd-assistant`, and each part is `.agd-assistant__<part>` (`.aa-button` is `.agd-assistant__button`, `.aa-primary` is `.agd-assistant__primary`). Rename any override in your own CSS. The `--aa-*` variables keep their names. A new `--aa-edge` variable sets the strong edge, and `--aa-border` is now the soft border.
 - The label on every part the assistant makes reads "AI-generated" (it read "Machine-made"). It stays visible and is real text, so a screen reader reads it. The `data-machine-made` attribute does not change.
 
