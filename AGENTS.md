@@ -1,40 +1,23 @@
 # agentic-assistant agent guide
 
-An AI assistant panel that acts inside your apps with the user's own permissions.
+An AI assistant that acts inside your apps with the user's own permissions.
 
 ## Mental model
 
-Text goes in. Stats or a route receipt come out. One core serves
-all three faces, so each face returns the same shape.
+A host builds a registry of tools, a principal with scopes, and a model provider. `runAssistant`
+streams events. The assistant is always an `agent_of_human`. It never holds more scopes than the host gave it.
 
-## The three faces
+## Surfaces
 
-- SDK: `import { summarizeText } from "agentic-assistant"`.
-- CLI: `npx agentic-assistant summary --text "..."`.
-- MCP: `npx agentic-assistant mcp`, then call a tool below.
+- SDK: `import { runAssistant } from "agentic-assistant"`.
+- Test provider: `import { ScriptedProvider } from "agentic-assistant/testing"`.
+- CLI and MCP server: not built yet.
 
 Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
 
-## MCP tools
-
-| Tool | Use it for |
-| --- | --- |
-| summarize_text | Count chars, words, lines, top words. |
-| dispatch_text | Route one text. Pass dryRun to preview. |
-| get_cost_report | Read session cost totals. |
-
-## The loop
-
-1. Discover the tools with `tools/list`.
-2. Run `summarize_text` on a sample.
-3. Preview a route with `dispatch_text` and dryRun true.
-4. Run the real route when the preview looks right.
-5. Read `get_cost_report` and state the cost.
-
 ## Rules
 
-- Preview with dry run before each real dispatch.
-- Stop when a guard denies the call. State the reason.
-- Never retry a denied call with changed text to dodge a guard.
-- Report adapter errors as errors. Never present them as success.
-- State the cost report before you claim the task is done.
+- Pass only the scopes the person granted. Never widen them.
+- Treat a denied tool call as final. Do not retry it with changed input.
+- Report a stopped run with its reason. Never present a cap stop as success.
+- Do not mention the origin of the code in any repo text.
