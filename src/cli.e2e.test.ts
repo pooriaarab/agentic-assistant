@@ -317,6 +317,15 @@ describe("approving at the terminal", () => {
     expect(notes.counters.notes_write).toBe(before + 1);
   });
 
+  test("the question shows at most 500 characters of arguments", async () => {
+    const questions: string[] = [];
+    const { io } = fakeIo({ isTTY: true, ask: async (q) => (questions.push(q), "n") });
+    await runCli(args([write("n5", "x".repeat(5000)), { text: "ok" }]), io);
+    expect(questions[0]).toContain("[truncated: ");
+    expect(questions[0].length).toBeLessThan(700);
+    expect(questions[0]).toMatch(/\? \[y\/N\] $/);
+  });
+
   test.each([["n"], [""], ["maybe"], ["yes please do it"]])("answer %j does not run it", async (answer) => {
     const before = notes.counters.notes_write ?? 0;
     const { io } = fakeIo({ isTTY: true, ask: async () => answer });
@@ -362,6 +371,12 @@ describe("hardening", () => {
     const result = await cli(base([...readOnly, "--script", script([read(`\u202Eetirw_seton\u200b${"😀".repeat(300)}`), { text: "ok" }]), "go"]));
     expect(result.stderr).not.toMatch(/[\u202e\u200b]/);
     expect(result.stderr).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
+  test("removes soft hyphens, word joiners, and Unicode tag characters", async () => {
+    const result = await cli(base([...readOnly, "--script", script([read("a\u00adb\u2060c\u{e0041}\u{e007f}d"), { text: "ok" }]), "go"]));
+    expect(result.stderr).toContain('"id":"abcd"');
+    expect(result.stderr).not.toMatch(/[\u00ad\u2060]|[\u{e0000}-\u{e007f}]/u);
   });
 
   test("removes control characters from the error of a tool server", async () => {

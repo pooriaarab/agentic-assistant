@@ -6,6 +6,7 @@ import { AnthropicProvider } from "./providers/anthropic.js";
 import { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 import { connectMcpTools, type McpTransportConfig } from "./sources/mcp.js";
 import { ScriptedProvider, type ScriptedTurn } from "./testing.js";
+import { cutText, printable } from "./text.js";
 import { ToolRegistry } from "./tools.js";
 import { ProviderError, type Message, type ModelProvider, type Pricing } from "./types.js";
 
@@ -131,6 +132,9 @@ function buildProvider(config: ChatConfig, io: ChatIo): ModelProvider {
   }
 }
 
+/** The arguments in an approval question are cut at this many characters. */
+const MAX_QUESTION_ARGUMENT_CHARS = 500;
+
 /**
  * Approves a call only when the person approved this exact tool and these exact arguments, on the
  * command line or at the prompt. The digest binds the tool, the arguments, and the principal.
@@ -156,8 +160,9 @@ class CommandLineGate implements ApprovalGate {
     }
     if (this.mode === "ask" && this.ask !== undefined) {
       // The question comes before the event is shown, so it carries the label itself.
-      const show = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "");
-      const answer = await this.ask(`[machine-made request] Approve ${show(request.tool)} (${request.risk}) with ${show(JSON.stringify(request.input))}? [y/N] `);
+      // The arguments can be large, so the question shows at most MAX_QUESTION_ARGUMENT_CHARS of them.
+      const args = cutText(printable(JSON.stringify(request.input)), MAX_QUESTION_ARGUMENT_CHARS);
+      const answer = await this.ask(`[machine-made request] Approve ${printable(request.tool)} (${request.risk}) with ${args}? [y/N] `);
       if (/^y(es)?$/i.test(answer.trim())) return { requestId: request.id, approved: true, digest: request.digest, decidedBy: `cli:${this.user}` };
     }
     return { requestId: request.id, approved: false, reason: "not approved on the command line" };
