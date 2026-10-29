@@ -86,8 +86,12 @@ export class AnthropicProvider implements ModelProvider {
     if (options.baseUrl === undefined && options.useDefaultEndpoint !== true) {
       throw new ProviderError("set baseUrl, or set useDefaultEndpoint: true to call api.anthropic.com, a US-hosted endpoint");
     }
+    const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    if (typeof apiKey !== "string" || apiKey.length === 0) {
+      throw new ProviderError("apiKey is required: pass it, or set ANTHROPIC_API_KEY");
+    }
     this.client = new Anthropic({
-      apiKey: options.apiKey,
+      apiKey,
       ...(options.baseUrl !== undefined ? { baseURL: checkBaseUrl(options.baseUrl).text } : {}),
     });
   }

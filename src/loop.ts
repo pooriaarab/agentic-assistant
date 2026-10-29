@@ -19,6 +19,8 @@ export interface RunLimits {
   maxCostUsd?: number;
   /** Output token ceiling for one turn. Default 4096. */
   maxOutputTokensPerTurn?: number;
+  /** Most tool calls the model may make in one turn. A larger turn runs none. Default 16. */
+  maxToolCallsPerTurn?: number;
   /** Longest tool result, in characters, sent to the model. Longer results are cut. Default 32768. */
   maxToolResultChars?: number;
 }
@@ -43,6 +45,7 @@ export type DoneReason =
   | "max_turns"
   | "token_cap"
   | "cost_cap"
+  | "tool_call_cap"
   | "provider_error"
   | "principal_inactive"
   | "aborted";
@@ -75,6 +78,7 @@ export type AssistantEvent =
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 32_768;
+const DEFAULT_MAX_TOOL_CALLS_PER_TURN = 16;
 // A cautious guess of three characters per token, used only to refuse a request that is sure to pass the token cap.
 const CHARS_PER_TOKEN_ESTIMATE = 3;
 
@@ -89,6 +93,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxTotalTokens = positiveInteger("maxTotalTokens", limits.maxTotalTokens);
   const maxOutput = positiveInteger("maxOutputTokensPerTurn", limits.maxOutputTokensPerTurn, DEFAULT_MAX_OUTPUT_TOKENS) as number;
   const maxToolResultChars = positiveInteger("maxToolResultChars", limits.maxToolResultChars, DEFAULT_MAX_TOOL_RESULT_CHARS) as number;
+  const maxToolCalls = positiveInteger("maxToolCallsPerTurn", limits.maxToolCallsPerTurn, DEFAULT_MAX_TOOL_CALLS_PER_TURN) as number;
   const prices = provider.pricing;
   if (prices !== undefined) {
     for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
@@ -107,7 +112,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
     }
     maxCostUsd = limits.maxCostUsd;
   }
-  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars };
+  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls };
 }
 
 async function principalActive(principal: AssistantPrincipal, now: number): Promise<boolean> {
@@ -142,7 +147,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const DONE_FOR_STOP: Record<Exclude<StopReason, "tool_use">, DoneReason> = {
+const DONE_FOR_STOP: Partial<Record<StopReason, DoneReason>> = {
   end_turn: "end_turn",
   max_tokens: "max_tokens",
   refusal: "refusal",
@@ -200,15 +205,25 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       .list()
       .filter((tool) => hasScope(principal.scopes, tool.scope))
       .map(toToolSpec);
-    const tokenRoom =
-      limits.maxTotalTokens === undefined
-        ? Number.POSITIVE_INFINITY
-        : limits.maxTotalTokens -
-          totals.inputTokens -
-          totals.outputTokens -
-          Math.ceil(JSON.stringify({ system: options.system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
-    if (tokenRoom <= 0) {
-      yield finish("token_cap");
+    const estimatedInput = Math.ceil(JSON.stringify({ system: options.system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
+    // The most output this request may use, and the cap that sets it.
+    let room = limits.maxOutput;
+    let limitedBy: DoneReason = "token_cap";
+    if (limits.maxTotalTokens !== undefined) {
+      const left = limits.maxTotalTokens - totals.inputTokens - totals.outputTokens - estimatedInput;
+      if (left < room) room = left;
+    }
+    if (limits.maxCostUsd !== undefined && provider.pricing !== undefined) {
+      const { inputPerMTok, outputPerMTok } = provider.pricing;
+      const microDollarsLeft = (limits.maxCostUsd - totals.costUsd) * 1_000_000 - estimatedInput * inputPerMTok;
+      const left = outputPerMTok > 0 ? Math.floor(microDollarsLeft / outputPerMTok) : microDollarsLeft > 0 ? room : 0;
+      if (left < room) {
+        room = left;
+        limitedBy = "cost_cap";
+      }
+    }
+    if (!(room > 0)) {
+      yield finish(limitedBy);
       return;
     }
     let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage } | undefined;
@@ -217,7 +232,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         system: options.system,
         messages,
         tools,
-        maxOutputTokens: Math.min(limits.maxOutput, tokenRoom),
+        maxOutputTokens: room,
         signal,
       })) {
         if (event.type === "text_delta") yield event;
@@ -244,13 +259,17 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
     yield { type: "turn_end", turn, usage: final.usage, totals: { ...totals } };
 
     if (final.stopReason !== "tool_use") {
-      yield finish(DONE_FOR_STOP[final.stopReason]);
+      yield finish(DONE_FOR_STOP[final.stopReason] ?? "provider_stop");
       return;
     }
     const calls = final.content.filter((block): block is Extract<ContentBlock, { type: "tool_use" }> => block.type === "tool_use");
-    if (calls.length === 0) throw new ProviderError("provider stopped for tool use but sent no tool call");
+    if (calls.length === 0) {
+      yield finish("provider_error", "provider stopped for tool use but sent no tool call");
+      return;
+    }
 
-    const stopBefore = capReason() ?? (turn === limits.maxTurns ? "max_turns" : undefined);
+    const stopBefore =
+      capReason() ?? (calls.length > limits.maxToolCallsPerTurn ? "tool_call_cap" : turn === limits.maxTurns ? "max_turns" : undefined);
     const results: ContentBlock[] = [];
     const skipRest = (reason: DoneReason, from: number): AssistantEvent => {
       for (const call of calls.slice(from)) {

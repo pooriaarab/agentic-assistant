@@ -173,12 +173,27 @@ describe("run loop", () => {
   });
 
   test("the cost cap stops the run", async () => {
-    const turns = Array.from({ length: 5 }, () => ({ toolCalls: [{ name: "notes_read", input: {} }], usage: { inputTokens: 10, outputTokens: 5 } }));
-    const { read, run } = setup(turns, ["notes:read"], { maxCostUsd: 20 }, { inputPerMTok: 1_000_000, outputPerMTok: 1_000_000 });
+    const turns = Array.from({ length: 5 }, () => ({ toolCalls: [{ name: "notes_read", input: {} }], usage: { inputTokens: 10_000, outputTokens: 5_000 } }));
+    const { read, run } = setup(turns, ["notes:read"], { maxCostUsd: 0.02 }, { inputPerMTok: 1, outputPerMTok: 1 });
     const events = await run();
     expect(done(events).reason).toBe("cost_cap");
-    expect(done(events).totals.costUsd).toBe(30);
+    expect(done(events).totals.costUsd).toBeCloseTo(0.03);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  test("the cost cap limits what one request can spend", async () => {
+    const { provider, run } = setup([{ text: "hi" }], [], { maxCostUsd: 1 }, { inputPerMTok: 1, outputPerMTok: 1000 });
+    await run();
+    // $1 at $0.001 per output token leaves room for under 1000 output tokens.
+    expect(provider.requests[0]?.maxOutputTokens).toBeGreaterThan(0);
+    expect(provider.requests[0]?.maxOutputTokens).toBeLessThan(1000);
+  });
+
+  test("a request that cannot fit in the cost cap is not sent", async () => {
+    const { provider, run } = setup([{ text: "hi" }], [], { maxCostUsd: 0.000001 }, { inputPerMTok: 1000, outputPerMTok: 1000 });
+    const events = await run();
+    expect(done(events).reason).toBe("cost_cap");
+    expect(provider.requests).toHaveLength(0);
   });
 
   test("a cost cap with no pricing is refused", async () => {
@@ -186,7 +201,7 @@ describe("run loop", () => {
     await expect(run()).rejects.toThrow(/needs pricing/);
   });
 
-  test.each([[{ maxTurns: 0 }], [{ maxTurns: 1.5 }], [{ maxTotalTokens: Number.NaN }], [{ maxCostUsd: -1 }], [{ maxOutputTokensPerTurn: 0 }]])(
+  test.each([[{ maxTurns: 0 }], [{ maxTurns: 1.5 }], [{ maxTotalTokens: Number.NaN }], [{ maxCostUsd: -1 }], [{ maxOutputTokensPerTurn: 0 }], [{ maxToolResultChars: 0 }], [{ maxToolCallsPerTurn: 0 }], [{ maxToolCallsPerTurn: Number.NaN }]])(
     "bad limits %j are refused",
     async (limits) => {
       const { run } = setup([{ text: "hi" }], [], limits as RunLimits, { inputPerMTok: 1, outputPerMTok: 1 });
@@ -203,6 +218,27 @@ describe("run loop", () => {
     const events = await run();
     expect(done(events)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("token usage") });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  test("a tool_use stop with no tool call ends the run with provider_error", async () => {
+    const { run } = setup([{ text: "calling...", stopReason: "tool_use" }], ["notes:read"]);
+    const events = await run();
+    expect(done(events)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("no tool call") });
+    expect(done(events).messages).toHaveLength(2);
+  });
+
+  test("an unknown stop reason ends the run with provider_stop", async () => {
+    const { run } = setup([{ text: "paused", stopReason: "pause_turn" as never }], []);
+    expect(done(await run()).reason).toBe("provider_stop");
+  });
+
+  test("too many tool calls in one turn run none of them", async () => {
+    const calls = Array.from({ length: 4 }, (_, i) => ({ name: "notes_read", input: { id: String(i) } }));
+    const { read, run } = setup([{ toolCalls: calls }], ["notes:read"], { maxToolCallsPerTurn: 3 });
+    const events = await run();
+    expect(done(events).reason).toBe("tool_call_cap");
+    expect(read).not.toHaveBeenCalled();
+    expectEveryToolUseAnswered(done(events).messages);
   });
 
   test("a provider failure keeps the transcript and the totals", async () => {

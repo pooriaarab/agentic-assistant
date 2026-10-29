@@ -1,4 +1,5 @@
 import { checkBaseUrl, isLoopback } from "./url.js";
+import { randomUUID } from "node:crypto";
 import {
   ProviderError,
   type ContentBlock,
@@ -17,7 +18,7 @@ export interface OpenAICompatibleOptions {
   /** Required for any host except localhost. An empty key is refused. */
   apiKey?: string;
   pricing?: Pricing;
-  /** Most characters of text plus tool arguments to accept in one response. Default 4,000,000. */
+  /** Most bytes to read from one response, comments and keep-alive lines included. Default 4,000,000. */
   maxResponseChars?: number;
   /** Provider name in events and errors. Default "openai-compatible". */
   name?: string;
@@ -81,7 +82,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     this.model = options.model;
     this.pricing = options.pricing;
     this.apiKey = options.apiKey;
-    this.maxResponseChars = options.maxResponseChars ?? 4_000_000;
+    const limit = options.maxResponseChars ?? 4_000_000;
+    if (!Number.isInteger(limit) || limit <= 0) throw new ProviderError("maxResponseChars must be a positive integer");
+    this.maxResponseChars = limit;
     const { url, text } = checkBaseUrl(options.baseUrl);
     this.baseUrl = text;
     if (options.apiKey === "" || (options.apiKey === undefined && !isLoopback(url))) {
@@ -120,10 +123,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let text = "";
     let received = 0;
     const limit = this.maxResponseChars;
-    const count = (chars: number) => {
-      received += chars;
-      if (received > limit) throw new ProviderError(`${this.name} response passed the size limit of ${limit} characters`);
-    };
     const calls = new Map<number, ToolCallAccumulator>();
     let finish: string | undefined;
     let usage: { prompt_tokens?: unknown; completion_tokens?: unknown } | undefined;
@@ -148,34 +147,32 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (choice.finish_reason) finish = choice.finish_reason;
       const delta = choice.delta;
       if (typeof delta?.content === "string" && delta.content.length > 0) {
-        count(delta.content.length);
         text += delta.content;
         yield { type: "text_delta", text: delta.content };
       }
       for (const part of delta?.tool_calls ?? []) {
         const call = calls.get(part.index) ?? { id: "", name: "", args: "" };
         if (part.id) call.id = part.id;
-        if (part.function?.name) {
-          count(part.function.name.length);
-          call.name += part.function.name;
-        }
-        if (part.function?.arguments) {
-          count(part.function.arguments.length);
-          call.args += part.function.arguments;
-        }
+        if (part.function?.name) call.name += part.function.name;
+        if (part.function?.arguments) call.args += part.function.arguments;
         calls.set(part.index, call);
       }
     };
 
     const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      if (buffer.length > limit) throw new ProviderError(`${this.name} response passed the size limit of ${limit} characters`);
-      for (const line of lines) yield* handle(line.trimEnd());
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > limit) throw new ProviderError(`${this.name} response passed the size limit of ${limit} bytes`);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) yield* handle(line.trimEnd());
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
     }
     if (buffer.length > 0) yield* handle(buffer.trimEnd());
 
@@ -191,7 +188,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       } catch {
         input = null;
       }
-      content.push({ type: "tool_use", id: call.id, name: call.name, input });
+      content.push({ type: "tool_use", id: call.id.length > 0 ? call.id : `call_${randomUUID()}`, name: call.name, input });
     }
     yield {
       type: "message",

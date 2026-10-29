@@ -10,7 +10,10 @@ export function checkBaseUrl(baseUrl: string): { url: URL; text: string } {
   try {
     url = new URL(baseUrl);
   } catch {
-    throw new ProviderError(`baseUrl is not a URL: ${baseUrl}`);
+    throw new ProviderError("baseUrl is not a valid URL");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new ProviderError("baseUrl must not carry credentials; pass apiKey instead");
   }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url))) {
     throw new ProviderError("baseUrl must use https, except for localhost");

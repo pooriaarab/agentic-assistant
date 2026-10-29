@@ -48,8 +48,8 @@ async function serve(respond: (seen: Seen, call: number) => { status?: number; c
 }
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-const anthropicTurn = (blocks: unknown[], stop: string, usage = { input_tokens: 25, output_tokens: 7 }) => [
-  sse("message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens, output_tokens: 1 } } }),
+const anthropicTurn = (blocks: unknown[], stop: string, usage = { input_tokens: 25, output_tokens: 7 }, cache = { cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }) => [
+  sse("message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens, output_tokens: 1, ...cache } } }),
   ...blocks.flatMap((b, i) => blockEvents(b as any, i)),
   sse("message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: usage.output_tokens } }),
   sse("message_stop", { type: "message_stop" }),
@@ -108,6 +108,8 @@ describe("Anthropic adapter", () => {
                 { type: "tool_use", id: "toolu_1", name: "notes_read", parts: ['{"id":', '"n1"}'] },
               ],
               "tool_use",
+              { input_tokens: 25, output_tokens: 7 },
+              { cache_creation_input_tokens: 10, cache_read_input_tokens: 100 },
             )
           : anthropicTurn([{ type: "text", parts: ["It says: note body"] }], "end_turn", { input_tokens: 60, output_tokens: 9 }),
     }));
@@ -117,7 +119,7 @@ describe("Anthropic adapter", () => {
     expect(calls).toEqual([{ id: "n1" }]);
     expect(events.filter((e) => e.type === "text_delta").map((e) => (e as any).text).join("")).toBe("Reading now.It says: note body");
     const end = events.at(-1) as Extract<AssistantEvent, { type: "done" }>;
-    expect(end).toMatchObject({ reason: "end_turn", totals: { inputTokens: 85, outputTokens: 16 } });
+    expect(end).toMatchObject({ reason: "end_turn", totals: { inputTokens: 195, outputTokens: 16 } });
 
     const [first, second] = seen;
     expect(first?.url).toBe("/v1/messages");
@@ -150,6 +152,20 @@ describe("Anthropic adapter", () => {
     expect(() => new AnthropicProvider({ apiKey: "k", useDefaultEndpoint: true })).not.toThrow();
     expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "https://models.example.eu" })).not.toThrow();
     expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "http://models.example.eu" })).toThrow(/https/);
+  });
+
+  test("a missing or empty key is refused", () => {
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      expect(() => new AnthropicProvider({ useDefaultEndpoint: true })).toThrow(/apiKey/);
+      expect(() => new AnthropicProvider({ apiKey: "", useDefaultEndpoint: true })).toThrow(/apiKey/);
+      process.env.ANTHROPIC_API_KEY = "from-env";
+      expect(() => new AnthropicProvider({ useDefaultEndpoint: true })).not.toThrow();
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = saved;
+    }
   });
 });
 
@@ -217,10 +233,41 @@ describe("OpenAI-compatible adapter", () => {
     expect((await run()).at(-1)).toMatchObject({ type: "done", reason: "provider_error", error: expect.stringContaining("503") });
   });
 
-  test("a stream that never ends is cut at the size limit", async () => {
-    const { url } = await serve(() => ({ chunks: [chunk({ content: "a".repeat(60) }), chunk({ content: "b".repeat(60) }), usageChunk(1, 1)] }));
+  test("a stream of comment lines is cut at the size limit", async () => {
+    const { url } = await serve(() => ({ chunks: [`: ${"ping ".repeat(30)}\n`, `: ${"ping ".repeat(30)}\n`] }));
     const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m", maxResponseChars: 100 }));
     expect((await run()).at(-1)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("size limit") });
+  });
+
+  test.each([[Number.NaN], [0], [-5], [1.5]])("a bad response limit %j is refused", (limit) => {
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://localhost:1/v1", model: "m", maxResponseChars: limit })).toThrow(/maxResponseChars/);
+  });
+
+  test("a URL with credentials is refused without echoing them", () => {
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "https://user:sk-SECRET@host.example.eu/v1", model: "m", apiKey: "k" })).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining("SECRET") }),
+    );
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "sk-SECRET not a url", model: "m", apiKey: "k" })).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining("SECRET") }),
+    );
+  });
+
+  test("tool calls with no id get unique ids", async () => {
+    const { url, seen } = await serve((_s, call) => ({
+      chunks:
+        call === 1
+          ? [
+              chunk({ tool_calls: [{ index: 0, function: { name: "notes_read", arguments: "{}" } }, { index: 1, function: { name: "notes_read", arguments: "{}" } }] }, "tool_calls"),
+              usageChunk(5, 5),
+            ]
+          : [chunk({ content: "ok" }, "stop"), usageChunk(5, 5)],
+    }));
+    const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m" }));
+    await run();
+    const ids = (seen[1]?.body.messages as { role: string; tool_call_id?: string }[]).filter((m) => m.role === "tool").map((m) => m.tool_call_id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
   });
 
   test("a key must be non-empty, and remote hosts need one", () => {
@@ -232,6 +279,6 @@ describe("OpenAI-compatible adapter", () => {
   test("a plain-HTTP remote URL is refused", () => {
     expect(() => new OpenAICompatibleProvider({ baseUrl: "http://models.example.eu/v1", model: "m", apiKey: "k" })).toThrow(/https/);
     expect(() => new OpenAICompatibleProvider({ baseUrl: "https://models.example.eu/v1", model: "m", apiKey: "k" })).not.toThrow();
-    expect(() => new OpenAICompatibleProvider({ baseUrl: "not a url", model: "m", apiKey: "k" })).toThrow(/not a URL/);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "not a url", model: "m", apiKey: "k" })).toThrow(/valid URL/);
   });
 });
