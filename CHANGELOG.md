@@ -17,11 +17,11 @@ Changed
 
 Migration from 0.4.0 (breaking: the auth path changed)
 
-- Static tokens are read by `agentic-identity` now. A bad or odd credential is still a 401. Check each caller after the upgrade, because the new route scope check can refuse a caller that worked before.
+- Static tokens are read by `agentic-identity` now. A bad or odd credential is still a 401. A scope must match `<resource>:<action>` and hold at most 64 characters. A longer scope fails the sign-in.
 - If you use the demo Worker, add `demo:read` to the scope list of each `ASSISTANT_TOKENS` entry. Without it every `/api/v1` route answers 403.
-- If you use `createWorker` with `routeScopes`, give each caller the scope of every route group it calls. Without it the caller gets 403 on that route.
-- If you use `createStaticTokenAuth`, give each token its own `id`. A map that uses one `id` twice throws when it is built.
+- If you use `createStaticTokenAuth`, give each token its own `id`. A map that uses one `id` twice throws when it is built. The `id` is the principal id, and it owns the pending approvals. When you rotate a key, remove the old token. Do not keep both under one `id`.
 - A token now also signs in as the `session` cookie. A write made with the cookie needs its `Origin` in the `origins` option, or it is a 403. Add the origins of your web app before you ship.
+- Your own Worker needs no change for the route scopes. `routeScopes` is new in 0.5.0 and is optional. If you pass it to `createWorker`, give each caller the scope of every route group it calls.
 
 ## 0.4.0
 
