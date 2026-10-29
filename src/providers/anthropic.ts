@@ -18,10 +18,11 @@ export const PRICING_CHECKED_ON = "2026-10-29";
 
 // US dollars per million tokens, from the published model table. A test fails when the date
 // above is older than 120 days. Pass the `pricing` option to use other prices.
+// Haiku 5.5 is not here on purpose: its price rises for prompts over 100K tokens, and one rate would
+// let a cost cap pass. Pass `pricing` for it.
 export const KNOWN_PRICING: Readonly<Record<string, Readonly<Pricing>>> = Object.freeze({
   "claude-sonnet-5-5": Object.freeze({ inputPerMTok: 2, outputPerMTok: 10 }),
   "claude-opus-5-5": Object.freeze({ inputPerMTok: 4, outputPerMTok: 20 }),
-  "claude-haiku-5-5": Object.freeze({ inputPerMTok: 0.1, outputPerMTok: 0.5 }),
 });
 
 export interface AnthropicProviderOptions {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { KNOWN_PRICING, PRICING_CHECKED_ON } from "./providers/anthropic.js";
+import { AnthropicProvider, KNOWN_PRICING, PRICING_CHECKED_ON } from "./providers/anthropic.js";
 
 const DAY_MS = 86_400_000;
 const MAX_AGE_DAYS = 120;
@@ -38,6 +38,12 @@ describe("price table", () => {
   test("the table cannot be changed at run time", () => {
     expect(Object.isFrozen(KNOWN_PRICING)).toBe(true);
     for (const price of Object.values(KNOWN_PRICING)) expect(Object.isFrozen(price)).toBe(true);
+  });
+
+  test("a model whose price depends on the prompt size has no single built-in rate", () => {
+    expect(Object.keys(KNOWN_PRICING)).not.toContain("claude-haiku-5-5");
+    expect(() => new AnthropicProvider({ model: "claude-haiku-5-5", baseUrl: "https://eu.example.org", apiKey: "k".repeat(20) }).pricing).not.toThrow();
+    expect(new AnthropicProvider({ model: "claude-haiku-5-5", baseUrl: "https://eu.example.org", apiKey: "k".repeat(20) }).pricing).toBeUndefined();
   });
 
   test("every price is a finite number of 0 or more", () => {

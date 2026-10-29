@@ -23,13 +23,12 @@ describe.skipIf(!live)("live smoke test (Anthropic API)", () => {
     });
     const events: AssistantEvent[] = [];
     for await (const event of runAssistant({
-      provider: new AnthropicProvider({ model: MODEL, useDefaultEndpoint: true }),
+      provider: new AnthropicProvider({ model: MODEL, useDefaultEndpoint: true, pricing: { inputPerMTok: 0.5, outputPerMTok: 2.5 } }),
       registry,
       principal: createPrincipal({ id: "agent:live", kind: "agent_of_human", parentId: "human:live", scopes: ["math:read"] }),
       messages: [{ role: "user", content: [{ type: "text", text: "Use the add tool to add 17 and 25. Then tell me the sum in one short sentence." }] }],
       limits: { maxTurns: 4, maxTotalTokens: 20_000, maxCostUsd: 0.25 },
-      // Prices for the default model are built in. Others need `pricing`; Haiku 5.5 is built in.
-    })) events.push(event);
+          })) events.push(event);
     const end = events.at(-1) as Extract<AssistantEvent, { type: "done" }>;
     expect(end.reason, end.error).toBe("end_turn");
     expect(calls).toHaveLength(1);
