@@ -23,7 +23,7 @@ const TOOLS = [
   { name: "bad_schema", description: "A schema that does not compile", inputSchema: { type: "object", properties: { a: { type: "nonsense" } } } },
 ];
 
-export function createNotesServer(counters = {}, { pageSize, endless, duplicate } = {}) {
+export function createNotesServer(counters = {}, { pageSize, endless, duplicate, badNames = 0 } = {}) {
   const server = new Server({ name: "notes", version: "1.0.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
     if (endless) {
@@ -31,7 +31,9 @@ export function createNotesServer(counters = {}, { pageSize, endless, duplicate 
       return { tools: [{ name: `page_tool_${page}`, description: "d", inputSchema: object({}) }], nextCursor: String(page + 1) };
     }
     if (duplicate) return { tools: [...TOOLS, TOOLS[0]] };
-    if (!pageSize) return { tools: TOOLS };
+    // Extra tools with names the assistant refuses, so a test can fill the skipped list.
+    const bad = Array.from({ length: badNames }, (_, i) => ({ name: `bad name ${i}!`, description: "A name the assistant refuses", inputSchema: object({}) }));
+    if (!pageSize) return { tools: [...TOOLS, ...bad] };
     const start = Number(request.params?.cursor ?? 0);
     const end = start + pageSize;
     return { tools: TOOLS.slice(start, end), ...(end < TOOLS.length ? { nextCursor: String(end) } : {}) };

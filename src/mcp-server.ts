@@ -36,6 +36,8 @@ export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal): 
     const stop = () => call.abort();
     extra.signal.addEventListener("abort", stop, { once: true });
     shutdown?.addEventListener("abort", stop, { once: true });
+    // A listener never fires for a signal that already fired, so a call that starts after shutdown stops here.
+    if (extra.signal.aborted || shutdown?.aborted) stop();
     let reply = "";
     const toolCalls: { name: string; isError: boolean; denied?: string }[] = [];
     let outcome: { reason: string; totals: unknown } | undefined;
