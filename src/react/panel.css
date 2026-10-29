@@ -1,13 +1,17 @@
 /* Plain CSS variables. They read the agentic-design tokens (--agd-color-*), so load
-   agentic-design/tokens.css once on the page. Override --aa-* on .aa-panel or a parent to match your app.
+   agentic-design/tokens.css once on the page. Override --aa-* on .agd-assistant to match your app.
    Without the tokens, each variable falls back to a system color, so focus and borders stay visible.
-   Every token pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks it.
+   The look is calm. Cards have soft borders. The text field, buttons, approval prompt, and warnings have a strong edge.
+   Space, radius, type, control size, and shadow come from the --agd-* tokens. Each has a fallback.
+   Each text, edge, and focus pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks them.
+   --aa-border is decoration only and is not checked, so do not use it for an edge people must see.
    No remote fonts or images. */
-.aa-panel {
+.agd-assistant {
   --aa-bg: var(--agd-color-surface, Canvas);
   --aa-fg: var(--agd-color-text, CanvasText);
   --aa-muted: var(--agd-color-text-muted, CanvasText);
-  --aa-border: var(--agd-color-border-strong, CanvasText);
+  --aa-border: var(--agd-color-border, CanvasText);
+  --aa-edge: var(--agd-color-border-strong, CanvasText);
   --aa-accent: var(--agd-color-accent, LinkText);
   --aa-accent-fg: var(--agd-color-text-on-accent, Canvas);
   --aa-focus: var(--agd-color-focus, LinkText);
@@ -17,6 +21,9 @@
   --aa-warn-bg: var(--agd-color-warning-subtle, Canvas);
   --aa-warn-fg: var(--agd-color-warning-text, CanvasText);
   --aa-danger: var(--agd-color-danger, LinkText);
+  --aa-hover-bg: var(--agd-color-surface-hover, Canvas);
+  --aa-accent-hover: var(--agd-color-accent-hover, LinkText);
+  --aa-shadow: var(--agd-shadow-raised, none);
 
   display: flex;
   flex-direction: column;
@@ -26,35 +33,39 @@
   background: var(--aa-bg);
   color: var(--aa-fg);
   border: 1px solid var(--aa-border);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border-radius: var(--agd-radius-lg, 1rem);
+  font-family: var(--agd-font-family-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 1rem;
-  line-height: 1.5;
+  line-height: var(--agd-line-height-normal, 1.55);
 }
-.aa-panel *, .aa-panel *::before, .aa-panel *::after { box-sizing: border-box; }
-.aa-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--aa-border); }
-.aa-title { margin: 0; font-size: 1.125rem; }
-.aa-log { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
-.aa-empty { color: var(--aa-muted); margin: 0; }
-.aa-msg { padding: 0.5rem 0.75rem; border: 1px solid var(--aa-border); border-radius: 0.5rem; }
-.aa-assistant { background: var(--aa-card-bg); }
-.aa-who { margin: 0 0 0.25rem; font-weight: 600; color: var(--aa-muted); }
-.aa-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.aa-badge { display: inline-block; padding: 0 0.5rem; border-radius: 0.25rem; background: var(--aa-machine-bg); color: var(--aa-machine-fg); font-size: 0.875rem; font-weight: 600; border: 1px solid var(--aa-machine-fg); }
-.aa-card, .aa-approval { padding: 0.5rem 0.75rem; border: 1px solid var(--aa-border); border-radius: 0.5rem; background: var(--aa-card-bg); }
-.aa-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.aa-status { color: var(--aa-muted); font-weight: 600; }
-.aa-pre { margin: 0.25rem 0 0; padding: 0.5rem; max-height: 12rem; overflow: auto; background: var(--aa-bg); border: 1px solid var(--aa-border); white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.875rem; }
-.aa-approval { background: var(--aa-warn-bg); color: var(--aa-warn-fg); border-width: 2px; border-color: var(--aa-warn-fg); }
-.aa-approval-title { margin: 0 0 0.25rem; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-.aa-warn { color: var(--aa-danger); background: var(--aa-bg); padding: 0.25rem 0.5rem; border: 2px solid var(--aa-danger); border-radius: 0.25rem; }
-.aa-notice { margin: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--aa-border); border-radius: 0.5rem; }
-.aa-composer { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid var(--aa-border); }
-.aa-label { font-weight: 600; }
-.aa-input { width: 100%; resize: vertical; padding: 0.5rem; font: inherit; color: var(--aa-fg); background: var(--aa-bg); border: 1px solid var(--aa-border); border-radius: 0.25rem; }
-.aa-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-.aa-composer .aa-actions { margin-top: 0; }
-.aa-button { min-height: 2rem; min-width: 2rem; padding: 0.25rem 1rem; font: inherit; font-weight: 600; color: var(--aa-fg); background: var(--aa-bg); border: 2px solid var(--aa-border); border-radius: 0.25rem; cursor: pointer; }
-.aa-button.aa-primary { color: var(--aa-accent-fg); background: var(--aa-accent); border-color: var(--aa-accent); }
-.aa-button:disabled { cursor: not-allowed; opacity: 0.6; }
-.aa-panel :focus-visible { outline: 3px solid var(--aa-focus); outline-offset: 2px; }
-@media (forced-colors: active) { .aa-badge, .aa-button, .aa-approval, .aa-warn { border: 2px solid CanvasText; } }
+.agd-assistant *, .agd-assistant *::before, .agd-assistant *::after { box-sizing: border-box; }
+.agd-assistant__header { display: flex; align-items: center; gap: var(--agd-space-2, 0.5rem); padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border-bottom: 1px solid var(--aa-border); }
+.agd-assistant__title { margin: 0; font-size: var(--agd-font-size-lg, 1.125rem); font-weight: 600; }
+.agd-assistant__log { flex: 1; overflow-y: auto; padding: var(--agd-space-4, 1rem); display: flex; flex-direction: column; gap: var(--agd-space-3, 0.75rem); }
+.agd-assistant__empty { color: var(--aa-muted); margin: 0; }
+/* .agd-assistant__user is a hook for host overrides. It has no style of its own. */
+.agd-assistant__msg { padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); }
+.agd-assistant__assistant { background: var(--aa-card-bg); }
+.agd-assistant__who { margin: 0 0 var(--agd-space-1, 0.25rem); font-size: var(--agd-font-size-sm, 0.875rem); font-weight: 600; color: var(--aa-muted); }
+.agd-assistant__text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agd-assistant__badge { display: inline-block; padding: 0 var(--agd-space-2, 0.5rem); border-radius: var(--agd-radius-full, 9999px); background: var(--aa-machine-bg); color: var(--aa-machine-fg); font-size: var(--agd-font-size-xs, 0.75rem); font-weight: 600; line-height: 1.5rem; border: 1px solid transparent; }
+.agd-assistant__card, .agd-assistant__approval { padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); background: var(--aa-card-bg); }
+.agd-assistant__card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--agd-space-2, 0.5rem); }
+.agd-assistant__status { color: var(--aa-muted); font-size: var(--agd-font-size-sm, 0.875rem); font-weight: 600; }
+.agd-assistant__pre { margin: var(--agd-space-1, 0.25rem) 0 0; padding: var(--agd-space-2, 0.5rem); max-height: 12rem; overflow: auto; background: var(--aa-bg); border: 1px solid var(--aa-edge); border-radius: var(--agd-radius-sm, 0.25rem); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--agd-font-family-mono, ui-monospace, Menlo, Consolas, monospace); font-size: var(--agd-font-size-sm, 0.875rem); }
+.agd-assistant__approval { background: var(--aa-warn-bg); color: var(--aa-warn-fg); border-width: 2px; border-color: var(--aa-warn-fg); box-shadow: var(--aa-shadow); }
+.agd-assistant__approval-title { margin: 0 0 var(--agd-space-1, 0.25rem); font-size: 1rem; display: flex; align-items: center; gap: var(--agd-space-2, 0.5rem); }
+.agd-assistant__warn { color: var(--aa-danger); background: var(--aa-bg); padding: var(--agd-space-1, 0.25rem) var(--agd-space-2, 0.5rem); border: 2px solid var(--aa-danger); border-radius: var(--agd-radius-sm, 0.25rem); }
+.agd-assistant__notice { margin: 0; padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); }
+.agd-assistant__composer { display: flex; flex-direction: column; gap: var(--agd-space-2, 0.5rem); padding: var(--agd-space-4, 1rem); border-top: 1px solid var(--aa-border); }
+.agd-assistant__label { font-size: var(--agd-font-size-sm, 0.875rem); font-weight: 600; }
+.agd-assistant__input { width: 100%; resize: vertical; padding: var(--agd-space-2, 0.5rem) var(--agd-space-3, 0.75rem); font: inherit; color: var(--aa-fg); background: var(--aa-bg); border: 1px solid var(--aa-edge); border-radius: var(--agd-radius-md, 0.5rem); }
+.agd-assistant__actions { display: flex; gap: var(--agd-space-2, 0.5rem); margin-top: var(--agd-space-2, 0.5rem); }
+.agd-assistant__composer .agd-assistant__actions { margin-top: 0; }
+.agd-assistant__button { min-height: var(--agd-size-control, 2.25rem); min-width: 2rem; padding: var(--agd-space-1, 0.25rem) var(--agd-space-4, 1rem); font: inherit; font-weight: 600; color: var(--aa-fg); background: var(--aa-bg); border: 1px solid var(--aa-edge); border-radius: var(--agd-radius-md, 0.5rem); cursor: pointer; }
+.agd-assistant__button.agd-assistant__primary { color: var(--aa-accent-fg); background: var(--aa-accent); border-color: var(--aa-accent); }
+.agd-assistant__button:hover:not(:disabled) { background: var(--aa-hover-bg); }
+.agd-assistant__button.agd-assistant__primary:hover:not(:disabled) { background: var(--aa-accent-hover); border-color: var(--aa-accent-hover); }
+.agd-assistant__button:disabled { cursor: not-allowed; opacity: 0.6; border-style: dashed; }
+.agd-assistant :focus-visible { outline: 2px solid var(--aa-focus); outline-offset: 2px; }
+@media (forced-colors: active) { .agd-assistant, .agd-assistant__badge, .agd-assistant__button, .agd-assistant__approval, .agd-assistant__warn, .agd-assistant__msg, .agd-assistant__card { border: 2px solid CanvasText; } }
