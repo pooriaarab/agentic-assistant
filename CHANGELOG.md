@@ -4,6 +4,7 @@
 
 Added
 
+- `agentic-assistant/client`, a typed fetch-based client for the HTTP API: `health`, `tools`, `chat` (an async generator of events), `approvals`, `approve`, and `deny`. It has an injectable `fetch`, a base URL, and a typed `AssistantApiError`.
 - A demo Worker entry (`dist/demo.js`, built from `src/demo.ts`), `wrangler.demo.jsonc`, and `npm run deploy:demo`. It serves a demo page, `/health`, and the `/api/v1` routes with bearer auth. With no model key, chat answers 503 `not_configured`.
 - `createStaticTokenAuth`, an `agentic-identity` `Auth` for a fixed map of bearer tokens.
 - Chat responses carry the header `x-ai-generated: true`.
