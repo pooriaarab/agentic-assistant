@@ -141,6 +141,7 @@ The assistant prints its answer on stdout. The answer starts with `Assistant (ma
 - `--scope` is what the assistant may hold. `--tool-scope` is what each tool needs. Both are required, and the CLI guesses neither.
 - `--tool-risk` defaults to `risky`. A risky call needs approval. Approve one exact call ahead of time with `--approve-call '{"tool":"notes_write","input":{"id":"7","text":"hi"}}'`. The call must match the tool and the arguments, and each approval is used once. On a terminal, `--approve ask` asks you.
 - Keys come from the environment: `ANTHROPIC_API_KEY`, or the variable named by `--api-key-env`. There is no flag that takes a key.
+- With `ANTHROPIC_API_KEY`, or the variable named by `--api-key-env`, unset or empty, `mcp` prints one line on stderr that names the variable, writes nothing to stdout, and exits 2.
 - For an EU-hosted model, use `--provider openai-compatible --base-url https://models.example.eu/v1 --model <id> --api-key-env EU_KEY`. Add `--price-in` and `--price-out` to use the cost cap.
 - A message on stdin may be up to 1 MB.
 - Limits: `--max-turns`, `--max-tokens`, `--max-cost`, `--max-tool-calls`.
