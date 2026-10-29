@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Changed
+
+- The demo page reads its colors from agentic-design tokens, with system-color fallbacks. It has no hard-coded hex colors.
+- `agentic-assistant mcp` without `--tools` exits 2 and names `mcp` and `--tools` in its message.
+
 ## 0.5.0
 
 Added
