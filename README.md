@@ -118,7 +118,7 @@ import "agentic-assistant/react.css";
 />;
 ```
 
-The panel colors are `agentic-design` tokens (`--ad-color-*`), so load `agentic-design/tokens.css` once, as above. The panel then follows your light or dark theme. Without the tokens the panel uses system colors. Set all `--ad-color-*` tokens or none: a partial set can give a pair that fails contrast. To set your own colors, override the `--aa-*` variables on `.aa-panel`.
+The panel colors are `agentic-design` tokens (`--agd-color-*`), so load `agentic-design/tokens.css` once, as above. The panel then follows your light or dark theme. Without the tokens the panel uses system colors. Set all `--agd-color-*` tokens or none: a partial set can give a pair that fails contrast. To set your own colors, override the `--aa-*` variables on `.aa-panel`.
 
 The panel streams the answer, shows each tool call as a card, and shows an approval prompt with the exact arguments. Every message, card, and prompt that the assistant makes carries a visible "Machine-made" label. Tool output is shown as text and never as HTML. The panel does not hold a model, a key, or a gate. It needs `react` 18 or newer.
 

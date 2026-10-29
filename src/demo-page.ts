@@ -10,13 +10,13 @@ export const DEMO_PAGE = `<!doctype html>
 <title>agentic-assistant demo</title>
 <style>
 :root{color-scheme:light dark}
-body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:var(--ad-color-text,CanvasText);background:var(--ad-color-surface,Canvas)}
+body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:var(--agd-color-text,CanvasText);background:var(--agd-color-surface,Canvas)}
 label{display:block;margin-top:1rem;font-weight:600}
 input,textarea,button{font:inherit;padding:.5rem;width:100%;box-sizing:border-box}
 button{width:auto;min-height:2.5rem;margin-top:1rem;cursor:pointer}
-:focus-visible{outline:3px solid var(--ad-color-focus,LinkText);outline-offset:2px}
-#out{white-space:pre-wrap;border:1px solid var(--ad-color-border-strong,CanvasText);padding:1rem;margin-top:1rem;min-height:4rem}
-.badge{display:inline-block;border:1px solid var(--ad-color-text,CanvasText);padding:0 .5rem;font-size:.875rem}
+:focus-visible{outline:3px solid var(--agd-color-focus,LinkText);outline-offset:2px}
+#out{white-space:pre-wrap;border:1px solid var(--agd-color-border-strong,CanvasText);padding:1rem;margin-top:1rem;min-height:4rem}
+.badge{display:inline-block;border:1px solid var(--agd-color-text,CanvasText);padding:0 .5rem;font-size:.875rem}
 </style>
 </head>
 <body>

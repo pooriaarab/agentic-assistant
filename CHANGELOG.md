@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+Changed
+
+- BREAKING: design class prefix is now agd-. The panel and demo page read the `--agd-color-*` tokens from `agentic-design` 0.4.0. The old prefix matches EasyList cosmetic rules, so ad blockers hid design-styled controls. Migration: set the `--agd-color-*` tokens in place of the old names, and load `agentic-design/tokens.css` from `agentic-design` ^0.4.0.
+- `agentic-design` peer dependency and dev dependency raised to `^0.4.0`.
+
 ## 0.5.2 - 2026-10-29
 
 No breaking changes. This is a patch release.
@@ -33,7 +40,7 @@ Changed
 
 - `createStaticTokenAuth` now builds a `createStoreAuth` over a memory Store. The local `Authorization` header parser is gone, so `agentic-identity` reads the credential. A token now also signs in as a `session` cookie, and a write by cookie needs an origin in `origins`. A token map may not use one `id` twice.
 - The demo Worker needs the scope `demo:read` on every `/api/v1` route. A token without it gets a 403. Migration: add `demo:read` to each scope list in `ASSISTANT_TOKENS`.
-- `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color, and the panel loses its blue accent, tinted cards, amber approval box, and red danger color (the risk notice shows in link blue). The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
+- `react.css` has no hex colors. Its `--aa-*` variables read the color tokens of `agentic-design` 0.3, so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color, and the panel loses its blue accent, tinted cards, amber approval box, and red danger color (the risk notice shows in link blue). The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
 - The OpenAI-compatible provider skips a chunk or tool-call part that is not an object, so a JSON `null` no longer throws. It gives a tool-call part with no `index` its own call when it has an `id`, and continues the last call when it has none. It cancels the body of a failed response.
 - The MCP tool source has unit tests.
 
