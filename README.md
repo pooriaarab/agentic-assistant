@@ -191,7 +191,7 @@ export default {
 };
 ```
 
-To deploy the demo Worker yourself, set the secrets `ASSISTANT_TOKENS` (a JSON map of a bearer token of 32 to 512 characters from `A-Za-z0-9_-` to `{"id":"ana","scopes":["demo:read"]}`) and `MODEL_KEY`, set the var `MODEL_URL` (or `MODEL_USE_DEFAULT_ENDPOINT=1` to call the US-hosted `api.anthropic.com`), then run `npm run deploy:demo`. Without `MODEL_KEY`, chat answers 503. `agentic-assistant/worker` also exports `createStaticTokenAuth`, an `agentic-identity` `Auth` that reads bearer tokens from a fixed map.
+To deploy the demo Worker yourself, set the secrets `ASSISTANT_TOKENS` (a JSON map of a bearer token of 32 to 512 characters from `A-Za-z0-9_-` to `{"id":"ana","scopes":["demo:read"]}`) and `MODEL_KEY`, set the var `MODEL_URL` (or `MODEL_USE_DEFAULT_ENDPOINT=1` to call the US-hosted `api.anthropic.com`), then run `npm run deploy:demo`. Without `MODEL_KEY`, chat answers 503. `agentic-assistant/worker` also exports `createStaticTokenAuth`, an `agentic-identity` `Auth` for a fixed map of bearer tokens. The demo Worker requires the scope `demo:read` on every route (a 403 without it): add it to each `ASSISTANT_TOKENS` entry when you upgrade. In your own Worker, pass `routeScopes` to `createWorker` to ask for a scope per route group.
 
 Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401. An Auth that fails gives a 503. A write signed in with a session cookie needs an `Origin` listed in the `origins` option, or it is a 403. Every chat response has the header `x-ai-generated: true`.
 

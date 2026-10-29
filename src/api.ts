@@ -18,6 +18,8 @@ export interface AssistantApiOptions {
   limits?: RunLimits;
   /** Origins (such as `https://app.example.org`) that may send a write signed in with a session cookie. A write with a cookie from any other origin is a 403. A Bearer key needs no origin. */
   origins?: readonly string[];
+  /** A scope a caller must hold for each route group. A caller without it gets a 403. A group left out needs no extra scope. `approvals` covers list, approve, and deny. */
+  routeScopes?: { tools?: string; chat?: string; approvals?: string };
   /** Most chat turns one principal may run at once. Default 4. */
   maxConcurrentRuns?: number;
 }
@@ -30,8 +32,8 @@ const DEFAULT_MAX_CONCURRENT_RUNS = 4;
 export const APPROVER_SCOPE = "assistant:admin";
 
 /** Reads the credential with the identity middleware. A caller, or the Response to send back. */
-async function callerOf(request: Request, auth: Auth, origins?: readonly string[]): Promise<Caller | Response> {
-  const found = await requirePrincipal(request, auth, { origins });
+async function callerOf(request: Request, auth: Auth, origins?: readonly string[], scope?: string): Promise<Caller | Response> {
+  const found = await requirePrincipal(request, auth, { origins, scope });
   // A 401 keeps this API's own text. A 403 or a 503 keeps the identity body.
   if (found instanceof Response) return found.status === 401 ? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" }) : found;
   return toCaller(found) ?? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" });
@@ -266,7 +268,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
       if (request.method !== allowed) return fail(405, "method not allowed", { allow: allowed });
       if (route !== "approvals" && id !== undefined) return fail(404, "not found");
 
-      const caller = await callerOf(request, options.auth, options.origins);
+      const caller = await callerOf(request, options.auth, options.origins, options.routeScopes?.[route as "tools" | "chat" | "approvals"]);
       if (caller instanceof Response) return caller;
 
       if (route === "tools") {

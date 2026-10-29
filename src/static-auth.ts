@@ -1,4 +1,4 @@
-import type { Auth, PrincipalContext } from "agentic-identity";
+import { createMemoryStore, createStoreAuth, type Auth } from "agentic-identity";
 import { parseScope } from "./scopes.js";
 
 /** What one bearer token stands for. The caller is always a person: `kind: "human"`. */
@@ -16,12 +16,14 @@ async function digest(token: string): Promise<string> {
 }
 
 /**
- * An `agentic-identity` Auth that reads `Authorization: Bearer <token>` against a fixed map.
+ * An `agentic-identity` Auth (`createStoreAuth` over a memory Store) for a fixed map of bearer tokens.
  * It keeps only SHA-256 digests. It throws on a token shorter than 32 bytes or an entry of the wrong shape.
  * An empty map is allowed: every request is then a 401.
  */
 export async function createStaticTokenAuth(tokens: Record<string, StaticTokenEntry>): Promise<Auth> {
-  const byDigest = new Map<string, PrincipalContext>();
+  // The tokens sit in a memory Store as digests. `createStoreAuth` reads the credential, so this file parses no header.
+  const store = createMemoryStore();
+  const ids = new Set<string>();
   for (const [token, entry] of Object.entries(tokens)) {
     if (encoder.encode(token).length < MIN_TOKEN_BYTES) throw new Error(`tokens must hold at least ${MIN_TOKEN_BYTES} bytes`);
     // The identity middleware refuses any other Bearer token with a 401, so such a token could never sign in.
@@ -35,18 +37,10 @@ export async function createStaticTokenAuth(tokens: Record<string, StaticTokenEn
       throw new Error("each token needs an id and a list of scopes");
     }
     for (const scope of entry.scopes) parseScope(scope);
-    byDigest.set(await digest(token), {
-      principalId: entry.id,
-      kind: "human",
-      chain: [{ id: entry.id, kind: "human" }],
-      scopes: [...entry.scopes],
-    });
+    if (ids.has(entry.id)) throw new Error("each token needs its own id");
+    ids.add(entry.id);
+    await store.put("principals", entry.id, { id: entry.id, kind: "human", scopes: [...entry.scopes] });
+    await store.put("credentials", await digest(token), { principalId: entry.id, kind: "api_key" });
   }
-  return {
-    async authenticate(request) {
-      const match = /^Bearer ([^\s]+)$/.exec(request.headers.get("authorization") ?? "");
-      const context = match ? byDigest.get(await digest(match[1] as string)) : undefined;
-      return context ? { ...context, chain: context.chain.map((step) => ({ ...step })), scopes: [...context.scopes] } : null;
-    },
-  };
+  return createStoreAuth(store);
 }

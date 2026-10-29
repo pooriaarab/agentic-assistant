@@ -31,6 +31,17 @@ describe("demo worker", () => {
     expect((await call("/api/v1/tools", { headers: { authorization: `Bearer ${"x".repeat(40)}` } })).status).toBe(401);
     expect((await call("/api/v1/tools", { headers: bearer }, {})).status).toBe(401);
   });
+  test("a good key without the route scope is a 403 on every route", async () => {
+    const other = { ASSISTANT_TOKENS: JSON.stringify({ [TOKEN]: { id: "ana", scopes: ["other:read"] } }) };
+    expect((await call("/api/v1/tools", { headers: bearer }, other)).status).toBe(403);
+    expect((await call("/api/v1/approvals", { headers: bearer }, other)).status).toBe(403);
+    const chat = await call("/api/v1/chat", { method: "POST", headers: bearer, body: JSON.stringify({ message: "hi" }) }, other);
+    expect(chat.status).toBe(403);
+    expect(JSON.stringify(await chat.json())).not.toContain(TOKEN);
+  });
+  test("a token map with one id twice is refused", async () => {
+    await expect(createStaticTokenAuth({ [TOKEN]: { id: "a", scopes: [] }, [`${TOKEN}2`]: { id: "a", scopes: ["demo:read"] } })).rejects.toThrow(/own id/);
+  });
   test("a good key lists the demo tool", async () => {
     const response = await call("/api/v1/tools", { headers: bearer });
     expect(response.status).toBe(200);

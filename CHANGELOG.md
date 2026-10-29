@@ -4,11 +4,14 @@
 
 Added
 
+- `routeScopes` option on `createAssistantApi` and `createWorker`: a scope that a caller must hold for `tools`, `chat`, or `approvals`. The default is no extra scope, so the public API does not change.
 - CLI commands `tools`, `approvals`, `approve <id> --digest <d>`, and `deny <id>`. They call a running assistant API with `--api <url>` and `--api-token-env <NAME>`.
 - With those flags, `agentic-assistant mcp` also serves `assistant_tools`, `assistant_approvals`, and `assistant_deny`. `--allow-approve` adds `assistant_approve`.
 
 Changed
 
+- `createStaticTokenAuth` now builds a `createStoreAuth` over a memory Store. The local `Authorization` header parser is gone, so `agentic-identity` reads the credential. A token now also signs in as a `session` cookie, and a write by cookie needs an origin in `origins`. A token map may not use one `id` twice.
+- The demo Worker needs the scope `demo:read` on every `/api/v1` route. A token without it gets a 403. Migration: add `demo:read` to each scope list in `ASSISTANT_TOKENS`.
 - `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color, and the panel loses its blue accent, tinted cards, amber approval box, and red danger color (the risk notice shows in link blue). The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
 
 ## 0.4.0

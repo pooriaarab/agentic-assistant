@@ -1,6 +1,7 @@
 import type { AssistantApiOptions } from "./api.js";
 import { DEMO_CSP, DEMO_PAGE } from "./demo-page.js";
 import { AnthropicProvider } from "./providers/anthropic.js";
+import { hasScope } from "./scopes.js";
 import { createStaticTokenAuth, type StaticTokenEntry } from "./static-auth.js";
 import { ToolRegistry } from "./tools.js";
 import { VERSION } from "./version.js";
@@ -29,6 +30,7 @@ const demoRegistry = (): ToolRegistry =>
     handler: () => ({ now: new Date().toISOString() }),
   });
 
+const DEMO_SCOPE = "demo:read";
 const DEMO_SYSTEM = "You are a demo assistant. You may use the demo_time tool. Answer in short, plain text.";
 
 function modelOptions(env: DemoEnv): { apiKey: string; baseUrl?: string; useDefaultEndpoint?: boolean; model?: string } | undefined {
@@ -54,6 +56,8 @@ async function buildDemo(env: DemoEnv): Promise<Demo> {
   const auth = await createStaticTokenAuth(tokens);
   const worker = createWorker({
     auth,
+    // A token without `demo:read` signs in but may use no route.
+    routeScopes: { tools: DEMO_SCOPE, chat: DEMO_SCOPE, approvals: DEMO_SCOPE },
     registry: demoRegistry(),
     system: DEMO_SYSTEM,
     limits: { maxTurns: 4, maxTotalTokens: 20_000, maxOutputTokensPerTurn: 1024 },
@@ -92,7 +96,9 @@ export default {
     }
     if (request.method === "POST" && url.pathname.replace(/\/$/, "") === "/api/v1/chat" && modelOptions(env) === undefined) {
       // Sign-in comes first, so a caller with no key learns nothing from this answer.
-      if ((await demo.auth.authenticate(request.clone())) !== null) return notConfigured("this demo has no model key or model endpoint set");
+      // A caller without the route scope falls through to the 403 of the API.
+      const who = await demo.auth.authenticate(request.clone());
+      if (who !== null && hasScope(who.scopes, DEMO_SCOPE)) return notConfigured("this demo has no model key or model endpoint set");
     }
     return demo.worker.fetch(request, env);
   },
