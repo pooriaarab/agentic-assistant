@@ -11,7 +11,7 @@ export { ToolRegistry, defineTool } from "./tools.js";
 export { connectMcpTools } from "./sources/mcp.js";
 export type { ConnectMcpOptions, McpToolInfo, McpTools, McpTransportConfig } from "./sources/mcp.js";
 export type { ToolContext, ToolDefinition } from "./tools.js";
-export { AnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from "./providers/anthropic.js";
+export { AnthropicProvider, DEFAULT_ANTHROPIC_MODEL, KNOWN_PRICING, PRICING_CHECKED_ON } from "./providers/anthropic.js";
 export type { AnthropicProviderOptions } from "./providers/anthropic.js";
 export { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 export type { OpenAICompatibleOptions } from "./providers/openai-compatible.js";
