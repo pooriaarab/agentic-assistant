@@ -3,8 +3,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { checkBaseUrl } from "../providers/url.js";
+import type { ToolRisk } from "../approvals.js";
 import type { Scope } from "../scopes.js";
 import { ToolRegistry, type ToolDefinition } from "../tools.js";
+import { cutText } from "../text.js";
 import { VERSION } from "../version.js";
 
 export type McpTransportConfig =
@@ -21,6 +23,8 @@ export interface ConnectMcpOptions {
   transport: McpTransportConfig;
   /** The scope each tool needs. There is no default. A function can choose per tool. */
   scope: Scope | ((tool: McpToolInfo) => Scope);
+  /** How risky each tool is. There is no default. A function can choose per tool. Do not trust the server's hints. */
+  risk: ToolRisk | ((tool: McpToolInfo) => ToolRisk);
   /** Put before each tool name, to keep names from two servers apart. */
   prefix?: string;
   /** Most characters of tool output to keep. Default 32768. */
@@ -48,16 +52,20 @@ const MAX_PAGES = 20;
 /** Longest schema, as JSON text, that is passed to the model. */
 const MAX_SCHEMA_CHARS = 20_000;
 
-function positive(name: string, value: number | undefined, fallback: number): number {
+function positive(name: string, value: number | undefined, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
   const chosen = value ?? fallback;
-  if (!Number.isInteger(chosen) || chosen <= 0) throw new RangeError(`${name} must be a positive integer`);
+  if (!Number.isInteger(chosen) || chosen <= 0 || chosen > max) throw new RangeError(`${name} must be a positive integer of at most ${max}`);
   return chosen;
 }
+
+/** The longest delay setTimeout takes. A larger one fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** A fetch that stops reading a response after `limit` bytes. */
 function boundedFetch(limit: number): typeof fetch {
   return async (input, init) => {
-    const response = await fetch(input, init);
+    // A redirect would skip the https rule, so none is followed.
+    const response = await fetch(input, { ...init, redirect: "error" });
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > limit) {
       await response.body?.cancel();
@@ -78,14 +86,33 @@ function boundedFetch(limit: number): typeof fetch {
   };
 }
 
-/** Copies a schema with its free text cut, so it cannot carry a long instruction to the model. */
-function limitSchemaText(value: unknown, max: number): unknown {
+const SCHEMA_NAME_MAPS = new Set(["properties", "$defs", "definitions", "dependentSchemas"]);
+const SCHEMA_TEXT_KEYS = new Set(["description", "title", "$comment"]);
+const SCHEMA_VALUE_KEYS = new Set(["default", "const", "enum"]);
+
+function cutStrings(value: unknown, max: number): unknown {
+  if (typeof value === "string") return cut(value, max);
+  if (Array.isArray(value)) return value.map((item) => cutStrings(item, max));
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cutStrings(child, max)]));
+  }
+  return value;
+}
+
+/**
+ * Copies a schema with its free text cut, so it cannot carry a long instruction to the model.
+ * `namesMap` is true inside `properties` and similar maps, where the keys are names and not keywords.
+ */
+function limitSchemaText(value: unknown, max: number, namesMap = false): unknown {
   if (Array.isArray(value)) return value.map((item) => limitSchemaText(item, max));
   if (typeof value !== "object" || value === null) return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    if (key === "examples") continue;
-    out[key] = (key === "description" || key === "title" || key === "$comment") && typeof child === "string" ? cut(child, max) : limitSchemaText(child, max);
+    if (namesMap) out[key] = limitSchemaText(child, max);
+    else if (key === "examples") continue;
+    else if (SCHEMA_TEXT_KEYS.has(key) && typeof child === "string") out[key] = cut(child, max);
+    else if (SCHEMA_VALUE_KEYS.has(key)) out[key] = cutStrings(child, max);
+    else out[key] = limitSchemaText(child, max, SCHEMA_NAME_MAPS.has(key));
   }
   return out;
 }
@@ -101,10 +128,7 @@ function makeTransport(config: McpTransportConfig, maxResponseBytes: number): Tr
   });
 }
 
-/** Cuts text at `max` characters and says how much was cut. */
-function cut(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}\n[truncated: ${text.length - max} characters omitted]`;
-}
+const cut = cutText;
 
 type CallResult = { isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown };
 
@@ -124,8 +148,8 @@ export async function connectMcpTools(options: ConnectMcpOptions): Promise<McpTo
   const maxOutput = positive("maxOutputChars", options.maxOutputChars, 32_768);
   const maxTools = positive("maxTools", options.maxTools, 200);
   const maxDescription = positive("maxDescriptionChars", options.maxDescriptionChars, 1000);
-  const callTimeout = positive("callTimeoutMs", options.callTimeoutMs, 30_000);
-  const loadTimeout = positive("loadTimeoutMs", options.loadTimeoutMs, 30_000);
+  const callTimeout = positive("callTimeoutMs", options.callTimeoutMs, 30_000, MAX_TIMER_MS);
+  const loadTimeout = positive("loadTimeoutMs", options.loadTimeoutMs, 30_000, MAX_TIMER_MS);
   const maxResponseBytes = positive("maxResponseBytes", options.maxResponseBytes, 4_000_000);
   const prefix = options.prefix ?? "";
   const client = new Client({ name: "agentic-assistant", version: VERSION });
@@ -157,11 +181,13 @@ export async function connectMcpTools(options: ConnectMcpOptions): Promise<McpTo
       try {
         if (JSON.stringify(info.inputSchema).length > MAX_SCHEMA_CHARS) throw new Error("input schema is too large");
         const scope = typeof options.scope === "function" ? options.scope(info) : options.scope;
+        const risk = typeof options.risk === "function" ? options.risk(info) : options.risk;
         const definition: ToolDefinition = {
           name: `${prefix}${info.name}`,
           description: cut(info.description ?? "", maxDescription),
           inputSchema: limitSchemaText(info.inputSchema, maxDescription) as Record<string, unknown>,
           scope,
+          risk,
           handler: async (input, context) => {
             const result = (await client.callTool({ name: info.name, arguments: input }, undefined, {
               signal: context.signal,

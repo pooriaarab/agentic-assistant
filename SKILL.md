@@ -19,9 +19,13 @@ for await (const event of runAssistant({ provider: new AnthropicProvider({ useDe
 ## Load tools from an MCP server
 
 ```ts
-const mcp = await connectMcpTools({ transport: { type: "stdio", command: "node", args: ["server.js"] }, scope: "notes:read" });
+const mcp = await connectMcpTools({ transport: { type: "stdio", command: "node", args: ["server.js"] }, scope: "notes:read", risk: "safe" });
 registry.registerAll(mcp.tools);
 ```
+
+## Ask a person first
+
+Give each tool a `risk`. Pass `approvals: new QueueApprovalGate()` to `runAssistant`. On an `approval_request` event, show the exact arguments. Then call `approve(id, personId)` or `reject(id, personId)`.
 
 ## Test without a model
 
@@ -31,4 +35,5 @@ Use `ScriptedProvider` from `agentic-assistant/testing`. Give it one scripted tu
 
 - Pass only the scopes the person granted.
 - A denied call stays denied.
+- Never approve your own action.
 - Read `done.reason` to learn why a run stopped.

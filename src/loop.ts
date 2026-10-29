@@ -1,4 +1,14 @@
+import {
+  deepFreeze,
+  digestCall,
+  newApprovalId,
+  refuseDecision,
+  type ApprovalDecision,
+  type ApprovalGate,
+  type ApprovalRequest,
+} from "./approvals.js";
 import { actorOf, assertPrincipal, type Actor, type AssistantPrincipal } from "./principal.js";
+import { cutText } from "./text.js";
 import { hasScope } from "./scopes.js";
 import { toToolSpec, type ToolRegistry } from "./tools.js";
 import {
@@ -19,6 +29,8 @@ export interface RunLimits {
   maxCostUsd?: number;
   /** Output token ceiling for one turn. Default 4096. */
   maxOutputTokensPerTurn?: number;
+  /** Time to wait for a person to decide. No decision in time means the call is refused. Default 300000. */
+  approvalTimeoutMs?: number;
   /** Most tool calls the model may make in one turn. A larger turn runs none. Default 16. */
   maxToolCallsPerTurn?: number;
   /** Longest tool result, in characters, sent to the model. Longer results are cut. Default 32768. */
@@ -32,6 +44,8 @@ export interface RunOptions {
   /** The conversation so far, ending with the new user message. */
   messages: readonly Message[];
   system?: string;
+  /** Asked before a `risky` or `irreversible` tool runs. Without it, those tools are not offered and are refused. */
+  approvals?: ApprovalGate;
   limits?: RunLimits;
   signal?: AbortSignal;
   now?: () => number;
@@ -50,7 +64,7 @@ export type DoneReason =
   | "principal_inactive"
   | "aborted";
 
-export type DeniedReason = "unknown_tool" | "scope" | "invalid_input";
+export type DeniedReason = "unknown_tool" | "scope" | "invalid_input" | "approval";
 
 export interface RunTotals extends Usage {
   costUsd: number;
@@ -61,6 +75,8 @@ export type AssistantEvent =
   | { type: "turn_start"; turn: number }
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown; actor: Actor }
+  | { type: "approval_request"; request: ApprovalRequest }
+  | { type: "approval_decision"; requestId: string; approved: boolean; decidedBy?: string; reason?: string }
   | {
       type: "tool_result";
       id: string;
@@ -85,6 +101,11 @@ export const DATA_NOTICE =
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 32_768;
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN = 16;
+const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
+/** The longest delay setTimeout takes. A larger one fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** Longest approver text kept in an event. */
+const MAX_APPROVER_TEXT = 500;
 // A cautious guess of three characters per token, used only to refuse a request that is sure to pass the token cap.
 const CHARS_PER_TOKEN_ESTIMATE = 3;
 
@@ -100,6 +121,8 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxOutput = positiveInteger("maxOutputTokensPerTurn", limits.maxOutputTokensPerTurn, DEFAULT_MAX_OUTPUT_TOKENS) as number;
   const maxToolResultChars = positiveInteger("maxToolResultChars", limits.maxToolResultChars, DEFAULT_MAX_TOOL_RESULT_CHARS) as number;
   const maxToolCalls = positiveInteger("maxToolCallsPerTurn", limits.maxToolCallsPerTurn, DEFAULT_MAX_TOOL_CALLS_PER_TURN) as number;
+  const approvalTimeoutMs = positiveInteger("approvalTimeoutMs", limits.approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS) as number;
+  if (approvalTimeoutMs > MAX_TIMER_MS) throw new RangeError(`approvalTimeoutMs must be at most ${MAX_TIMER_MS}`);
   const prices = provider.pricing;
   if (prices !== undefined) {
     for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
@@ -118,7 +141,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
     }
     maxCostUsd = limits.maxCostUsd;
   }
-  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls };
+  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls, approvalTimeoutMs };
 }
 
 async function principalActive(principal: AssistantPrincipal, now: number): Promise<boolean> {
@@ -144,15 +167,12 @@ function serialize(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Quotes tool output for the model. Every `<` in the text is escaped, so no tag can be forged. */
+/** Quotes tool output for the model. The caller has already escaped every `<` in the text, so no tag can be forged. */
 function quoteToolOutput(tool: string, text: string): string {
-  return `<tool_output tool="${tool}">\n${text.replaceAll("<", "&lt;")}\n</tool_output>`;
+  return `<tool_output tool="${tool}">\n${text}\n</tool_output>`;
 }
 
-function limitText(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n[truncated: ${text.length - max} characters omitted]`;
-}
+const limitText = cutText;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -212,7 +232,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
     yield { type: "turn_start", turn };
     const tools = registry
       .list()
-      .filter((tool) => hasScope(principal.scopes, tool.scope))
+      .filter((tool) => hasScope(principal.scopes, tool.scope) && (tool.risk === "safe" || options.approvals !== undefined))
       .map(toToolSpec);
     const estimatedInput = Math.ceil(JSON.stringify({ system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
     // The most output this request may use, and the cap that sets it.
@@ -302,7 +322,11 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         return;
       }
       yield { type: "tool_call", id: call.id, name: call.name, input: call.input, actor };
-      const outcome = await dispatch(registry, principal, call, signal, limits.maxToolResultChars);
+      const outcome = yield* runCall({ registry, principal, actor, signal, now, gate: options.approvals, limits }, call);
+      if (outcome.stop !== undefined) {
+        yield skipRest(outcome.stop, index);
+        return;
+      }
       results.push({ type: "tool_result", toolUseId: call.id, content: outcome.modelContent, isError: outcome.isError });
       yield {
         type: "tool_result",
@@ -320,14 +344,53 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
   }
 }
 
-async function dispatch(
-  registry: ToolRegistry,
-  principal: AssistantPrincipal,
-  call: { id: string; name: string; input: unknown },
-  signal: AbortSignal | undefined,
-  maxChars: number,
-): Promise<{ content: string; modelContent: string; isError: boolean; denied?: DeniedReason; untrusted?: true; detail?: string }> {
-  const refuse = (content: string, denied: DeniedReason) => ({ content, modelContent: content, isError: true, denied });
+interface CallContext {
+  registry: ToolRegistry;
+  principal: AssistantPrincipal;
+  actor: Actor;
+  signal: AbortSignal | undefined;
+  now: () => number;
+  gate: ApprovalGate | undefined;
+  limits: ReturnType<typeof validateLimits>;
+}
+
+interface Outcome {
+  content: string;
+  modelContent: string;
+  isError: boolean;
+  denied?: DeniedReason;
+  untrusted?: true;
+  detail?: string;
+  /** Set when the run must stop, and this call did not run. */
+  stop?: "aborted" | "principal_inactive";
+}
+
+/** Asks the gate and waits. A failure or a missed deadline is an error, and the caller refuses the call. */
+async function awaitDecision(gate: ApprovalGate, request: ApprovalRequest, parent: AbortSignal | undefined, ms: number): Promise<ApprovalDecision> {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (parent?.aborted) throw new Error("the run was aborted");
+  parent?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await Promise.race([
+      gate.request(request, controller.signal),
+      new Promise<never>((_, reject) => {
+        const stop = () => reject(new Error("no decision before the deadline"));
+        // The gate may have aborted already, while it was being called.
+        if (controller.signal.aborted) stop();
+        else controller.signal.addEventListener("abort", stop, { once: true });
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function* runCall(ctx: CallContext, call: { id: string; name: string; input: unknown }): AsyncGenerator<AssistantEvent, Outcome> {
+  const { registry, principal, signal } = ctx;
+  const refuse = (content: string, denied: DeniedReason, detail?: string): Outcome => ({ content, modelContent: content, isError: true, denied, detail });
   const tool = registry.get(call.name);
   if (tool === undefined) return refuse(`unknown tool "${call.name}"`, "unknown_tool");
   if (!hasScope(principal.scopes, tool.scope)) {
@@ -336,10 +399,56 @@ async function dispatch(
   if (!isPlainObject(call.input)) return refuse("tool input must be a JSON object", "invalid_input");
   const problem = registry.checkInput(tool.name, call.input);
   if (problem !== undefined) return refuse(`input does not match the tool schema: ${problem}`, "invalid_input");
+  // One frozen copy, taken now. The model call, the event consumer, and the approver can all hold the
+  // original object. The tool runs on a copy of this one, so it gets exactly what the person approved.
+  const approved = deepFreeze(structuredClone(call.input));
+
+  if (tool.risk !== "safe") {
+    if (ctx.gate === undefined) return refuse(`denied: "${tool.name}" needs a person's approval, and none is set up`, "approval");
+    const request: ApprovalRequest = {
+      id: newApprovalId(),
+      tool: tool.name,
+      risk: tool.risk,
+      input: approved,
+      digest: digestCall({ tool: tool.name, input: approved, principalId: principal.id, onBehalfOf: principal.parentId }),
+      actor: ctx.actor,
+    };
+    yield { type: "approval_request", request };
+    if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
+    let decision: ApprovalDecision | undefined;
+    let failure: string | undefined;
+    try {
+      decision = await awaitDecision(ctx.gate, request, signal, ctx.limits.approvalTimeoutMs);
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+    if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
+    const why = failure !== undefined ? `the approval failed: ${failure}` : refuseDecision(decision, request, principal.id);
+    const declined = decision !== undefined && (decision as { approved?: unknown }).approved === false;
+    yield {
+      type: "approval_decision",
+      requestId: request.id,
+      approved: why === undefined,
+      decidedBy: typeof decision?.decidedBy === "string" ? decision.decidedBy.slice(0, MAX_APPROVER_TEXT) : undefined,
+      reason: why === undefined ? undefined : why.slice(0, MAX_APPROVER_TEXT),
+    };
+    if (why !== undefined) {
+      const detail = (declined && typeof (decision as { reason?: unknown }).reason === "string" ? `${why}: ${(decision as { reason: string }).reason}` : why).slice(0, MAX_APPROVER_TEXT);
+      return refuse("denied: a person did not approve this action", "approval", detail);
+    }
+    // The person may have taken a while. The principal must still be valid.
+    if (!(await principalActive(principal, ctx.now()))) return { ...refuse("", "approval"), stop: "principal_inactive" };
+  }
+
   try {
-    const value = await tool.handler(call.input, { principal, toolUseId: call.id, signal });
-    const content = limitText(serialize(value), maxChars);
-    return { content, modelContent: quoteToolOutput(tool.name, content), isError: false, untrusted: true };
+    const value = await tool.handler(structuredClone(approved) as Record<string, unknown>, { principal, toolUseId: call.id, signal });
+    const serialized = serialize(value);
+    return {
+      content: limitText(serialized, ctx.limits.maxToolResultChars),
+      modelContent: quoteToolOutput(tool.name, limitText(serialized.replaceAll("<", "&lt;"), ctx.limits.maxToolResultChars)),
+      isError: false,
+      untrusted: true,
+    };
   } catch (error) {
     return { content: "tool failed", modelContent: "tool failed", isError: true, detail: error instanceof Error ? error.message : String(error) };
   }

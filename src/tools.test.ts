@@ -17,7 +17,7 @@ describe("input validation", () => {
     required: ["id"],
     additionalProperties: false,
   };
-  const registry = new ToolRegistry().register({ name: "t", description: "d", inputSchema: schema, scope: "notes:read", handler: () => "ok" });
+  const registry = new ToolRegistry().register({ name: "t", description: "d", inputSchema: schema, scope: "notes:read", risk: "safe", handler: () => "ok" });
 
   test.each([
     ["a good input", { id: "a", count: 2 }, undefined],
@@ -37,20 +37,20 @@ describe("input validation", () => {
   });
 
   test("rejects a schema that is not an object schema", () => {
-    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: { type: "string" }, scope: "notes:read", handler: () => 1 })).toThrow(/type "object"/);
-    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: {}, scope: "notes:read", handler: () => 1 })).toThrow(/type "object"/);
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: { type: "string" }, scope: "notes:read", risk: "safe", handler: () => 1 })).toThrow(/type "object"/);
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: {}, scope: "notes:read", risk: "safe", handler: () => 1 })).toThrow(/type "object"/);
   });
 
   test("rejects a schema that does not compile, with a clear error", () => {
     const bad = { type: "object", properties: { a: { type: "nonsense" } } };
-    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: bad, scope: "notes:read", handler: () => 1 })).toThrow(/invalid input schema/);
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: bad, scope: "notes:read", risk: "safe", handler: () => 1 })).toThrow(/invalid input schema/);
   });
 
   test("accepts a draft marker, and the same id in two tools", () => {
     const withMeta = { $schema: "http://json-schema.org/draft-07/schema#", $id: "https://other.example/tool.json", type: "object" };
     const two = new ToolRegistry()
-      .register({ name: "a", description: "d", inputSchema: withMeta, scope: "notes:read", handler: () => 1 })
-      .register({ name: "b", description: "d", inputSchema: withMeta, scope: "notes:read", handler: () => 1 });
+      .register({ name: "a", description: "d", inputSchema: withMeta, scope: "notes:read", risk: "safe", handler: () => 1 })
+      .register({ name: "b", description: "d", inputSchema: withMeta, scope: "notes:read", risk: "safe", handler: () => 1 });
     expect(two.list()).toHaveLength(2);
   });
 
@@ -60,12 +60,20 @@ describe("input validation", () => {
     ["a pattern in a list", { type: "object", anyOf: [{ properties: { q: { type: "string", pattern: "x" } } }] }],
     ["patternProperties", { type: "object", patternProperties: { "^a": { type: "string" } } }],
   ])("refuses a schema with %s", (_name, inputSchema) => {
-    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema, scope: "notes:read", handler: () => 1 })).toThrow(/regular expression/);
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema, scope: "notes:read", risk: "safe", handler: () => 1 })).toThrow(/regular expression/);
   });
 
   test("allows a property that is named pattern", () => {
     const ok = { type: "object", properties: { pattern: { type: "string" } } };
-    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: ok, scope: "notes:read", handler: () => 1 })).not.toThrow();
+    expect(() => new ToolRegistry().register({ name: "a", description: "d", inputSchema: ok, scope: "notes:read", risk: "safe", handler: () => 1 })).not.toThrow();
+  });
+
+  test("input nested too deeply is a problem, not a crash", () => {
+    const recursive = { type: "object", properties: { c: { $ref: "#/$defs/n" } }, $defs: { n: { type: "object", properties: { c: { $ref: "#/$defs/n" } } } } };
+    const tools = new ToolRegistry().register({ name: "deep", description: "d", inputSchema: recursive, scope: "notes:read", risk: "safe", handler: () => 1 });
+    let input: Record<string, unknown> = {};
+    for (let i = 0; i < 20_000; i++) input = { c: input };
+    expect(tools.checkInput("deep", input)).toContain("too deeply");
   });
 
   test("checking an unknown tool is a problem, not a pass", () => {
@@ -77,7 +85,7 @@ describe("input validation", () => {
       name: "typed",
       description: "d",
       inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
-      scope: "notes:read",
+      scope: "notes:read", risk: "safe",
       handler: ({ id }) => id.toUpperCase(),
     });
     expect(new ToolRegistry().register(tool).get("typed")?.name).toBe("typed");
