@@ -8,7 +8,7 @@ Changed
 
 - The demo page sets `color-scheme: light dark`, so its system-color fallbacks follow the user's dark mode.
 - A test fails if a hard-coded hex color returns to the demo page style. This does not change the package.
-- The MCP start test with no model key is an end-to-end test now, and the README says so. This does not change the package.
+- An end-to-end test covers `mcp` with no model key, and the README documents that behavior. This does not change the package.
 
 Security
 
