@@ -63,6 +63,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
+    "prepack": "npm run build",
     "ci:local": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
