@@ -19,6 +19,8 @@
   --aa-warn-bg: var(--agd-color-warning-subtle, Canvas);
   --aa-warn-fg: var(--agd-color-warning-text, CanvasText);
   --aa-danger: var(--agd-color-danger, LinkText);
+  --aa-hover-bg: var(--agd-color-surface-hover, Canvas);
+  --aa-accent-hover: var(--agd-color-accent-hover, LinkText);
   --aa-shadow: var(--agd-shadow-raised, none);
 
   display: flex;
@@ -30,7 +32,6 @@
   color: var(--aa-fg);
   border: 1px solid var(--aa-border);
   border-radius: var(--agd-radius-lg, 1rem);
-  overflow: hidden;
   font-family: var(--agd-font-family-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 1rem;
   line-height: var(--agd-line-height-normal, 1.55);
@@ -61,8 +62,8 @@
 .agd-assistant__composer .agd-assistant__actions { margin-top: 0; }
 .agd-assistant__button { min-height: var(--agd-size-control, 2.25rem); min-width: 2rem; padding: var(--agd-space-1, 0.25rem) var(--agd-space-4, 1rem); font: inherit; font-weight: 600; color: var(--aa-fg); background: var(--aa-bg); border: 1px solid var(--aa-edge); border-radius: var(--agd-radius-md, 0.5rem); cursor: pointer; }
 .agd-assistant__button.agd-assistant__primary { color: var(--aa-accent-fg); background: var(--aa-accent); border-color: var(--aa-accent); }
-.agd-assistant__button:hover:not(:disabled) { background: var(--agd-color-surface-hover, Canvas); }
-.agd-assistant__button.agd-assistant__primary:hover:not(:disabled) { background: var(--agd-color-accent-hover, LinkText); border-color: var(--agd-color-accent-hover, LinkText); }
+.agd-assistant__button:hover:not(:disabled) { background: var(--aa-hover-bg); }
+.agd-assistant__button.agd-assistant__primary:hover:not(:disabled) { background: var(--aa-accent-hover); border-color: var(--aa-accent-hover); }
 .agd-assistant__button:disabled { cursor: not-allowed; opacity: 0.6; border-style: dashed; }
 .agd-assistant :focus-visible { outline: 2px solid var(--aa-focus); outline-offset: 2px; }
 @media (forced-colors: active) { .agd-assistant, .agd-assistant__badge, .agd-assistant__button, .agd-assistant__approval, .agd-assistant__warn, .agd-assistant__msg, .agd-assistant__card { border: 2px solid CanvasText; } }

@@ -40,7 +40,7 @@ function contrast(a: string, b: string): number {
 
 describe("panel styles", () => {
   test("reads the palette from agentic-design tokens, with no hex color of its own", () => {
-    expect(Object.keys(mapping)).toHaveLength(14);
+    expect(Object.keys(mapping)).toHaveLength(16);
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
       for (const [key, value] of Object.entries(variablesFor(name))) expect(value, `${name} ${key}`).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
@@ -56,6 +56,8 @@ describe("panel styles", () => {
     ["muted", "card-bg", 4.5],
     ["machine-fg", "machine-bg", 4.5],
     ["accent-fg", "accent", 4.5],
+    ["fg", "hover-bg", 4.5],
+    ["accent-fg", "accent-hover", 4.5],
     ["warn-fg", "warn-bg", 4.5],
     ["danger", "bg", 4.5],
     ["edge", "bg", 3],
@@ -90,7 +92,14 @@ describe("panel styles", () => {
       accent: "LinkText",
       focus: "LinkText",
       danger: "LinkText",
+      "hover-bg": "Canvas",
+      "accent-hover": "LinkText",
     });
+  });
+
+  test("the control height token is at least the 24 px minimum", () => {
+    const size = /--agd-size-control:\s*([\d.]+)rem;/.exec(tokenCss);
+    expect(Number(size?.[1]) * 16).toBeGreaterThanOrEqual(24);
   });
 
   test("buttons meet the minimum target size, and focus is visible", () => {
