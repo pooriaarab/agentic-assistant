@@ -36,10 +36,10 @@ Flags for tools, approvals, approve, and deny:
   --digest <digest>         approve only: the digest of the pending call.
   --reason <text>           deny only: why.
   --json                    Print the result as JSON on stdout.
-  The person behind the token decides. An agent token needs the assistant:admin scope.
 
 Flags for chat and mcp:
-  --api <url> --api-token-env <NAME>   mcp only: also serve assistant_tools, assistant_approvals, assistant_approve, assistant_deny.
+  --api <url> --api-token-env <NAME>   mcp only: also serve assistant_tools, assistant_approvals, assistant_deny.
+  --allow-approve           mcp only, with --api: also serve assistant_approve. Use an agent token (it needs assistant:admin).
   --tools <target>          An https MCP URL, or a command that starts an MCP server on stdio. Required.
   --tools-header-env <h=E>  Send header h with the value of environment variable E (http only). Repeat it.
   --scope <scope>           A scope the assistant may hold, like notes:read. Repeat it. Required.
@@ -92,6 +92,7 @@ const OPTIONS = {
   "max-tool-calls": { type: "string" },
   api: { type: "string" },
   "api-token-env": { type: "string" },
+  "allow-approve": { type: "boolean" },
   digest: { type: "string" },
   reason: { type: "string" },
   json: { type: "boolean" },
@@ -113,6 +114,7 @@ export interface Parsed {
   command: "chat" | "mcp" | "help" | "version" | "remote";
   config?: ChatConfig;
   remote?: RemoteConfig;
+  allowApprove?: boolean;
   remoteCommand?: RemoteCommand;
   message?: string;
   json: boolean;
@@ -131,30 +133,25 @@ export function parseCli(argv: string[]): Parsed {
   if (values.help || command === undefined) return { command: "help", json: false };
   const remoteNames = ["tools", "approvals", "approve", "deny"];
   if (command !== "chat" && command !== "mcp" && !remoteNames.includes(command)) throw new UsageError(`unknown command "${command}"`);
-  if (values.api !== undefined && values.api === "") throw new UsageError("--api needs a URL");
-  if (values["api-token-env"] === "") throw new UsageError("--api-token-env needs a variable name");
+  if (values.api === "" || values["api-token-env"] === "") throw new UsageError("--api needs a URL, and --api-token-env a variable name");
   if ((values.api === undefined) !== (values["api-token-env"] === undefined)) throw new UsageError("--api and --api-token-env go together");
   const remote: RemoteConfig | undefined = values.api !== undefined && values["api-token-env"] !== undefined ? { api: values.api, apiTokenEnv: values["api-token-env"] } : undefined;
   if (command !== "mcp" && command !== "chat" && remote === undefined) throw new UsageError("--api and --api-token-env are required");
   if (command === "chat" && remote !== undefined) throw new UsageError("--api works with mcp and the approval commands, not chat");
-  if (command === "approve" || command === "deny") {
-    if (rest.length !== 1) throw new UsageError(`${command} needs one approval id`);
-  } else if (remoteNames.includes(command) && rest.length > 0) {
-    throw new UsageError(`${command} takes no arguments`);
-  }
+  const wantsId = command === "approve" || command === "deny";
+  if (remoteNames.includes(command) && rest.length !== (wantsId ? 1 : 0)) throw new UsageError(wantsId ? `${command} needs one approval id` : `${command} takes no arguments`);
+  if (values["allow-approve"] && (command !== "mcp" || remote === undefined)) throw new UsageError("--allow-approve works with mcp and --api only");
   if (command !== "approve" && values.digest !== undefined) throw new UsageError("--digest works with approve only");
   if (command !== "deny" && values.reason !== undefined) throw new UsageError("--reason works with deny only");
   if (remoteNames.includes(command)) {
+    const chatOnly = Object.keys(values).filter((key) => !["api", "api-token-env", "digest", "reason", "json", "help", "version"].includes(key));
+    if (chatOnly.length > 0) throw new UsageError(`--${chatOnly[0]} does not work with ${command}`);
     const id = rest[0] as string;
-    let remoteCommand: RemoteCommand;
-    if (command === "approve") {
-      if (!values.digest) throw new UsageError("approve needs --digest <digest>");
-      remoteCommand = { name: "approve", id, digest: values.digest };
-    } else if (command === "deny") {
-      remoteCommand = { name: "deny", id, ...(values.reason !== undefined ? { reason: values.reason } : {}) };
-    } else {
-      remoteCommand = { name: command as "tools" | "approvals" };
-    }
+    if (command === "approve" && !values.digest) throw new UsageError("approve needs --digest <digest>");
+    const remoteCommand: RemoteCommand =
+      command === "approve" ? { name: "approve", id, digest: values.digest as string }
+      : command === "deny" ? { name: "deny", id, ...(values.reason !== undefined ? { reason: values.reason } : {}) }
+      : { name: command as "tools" | "approvals" };
     return { command: "remote", remote, remoteCommand, json: values.json ?? false };
   }
   if (!values.tools) throw new UsageError("--tools is required");
@@ -209,7 +206,7 @@ export function parseCli(argv: string[]): Parsed {
     preApproved,
     approve,
   };
-  return { command: command as "chat" | "mcp", config, remote, message: values.message ?? (rest.length > 0 ? rest.join(" ") : undefined), json: values.json ?? false };
+  return { command: command as "chat" | "mcp", config, remote, allowApprove: values["allow-approve"] ?? false, message: values.message ?? (rest.length > 0 ? rest.join(" ") : undefined), json: values.json ?? false };
 }
 
 export interface CliIo {
@@ -338,25 +335,22 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
       io.out(parsed.json ? `${JSON.stringify(data)}\n` : `${text}\n`);
       return 0;
     } catch (error) {
-      if (error instanceof ConfigError) {
-        io.err(`${error.name}: ${oneLine(error.message, 500)}`);
-        return 2;
-      }
-      io.err(describeFailure(error));
-      return 1;
+      io.err(error instanceof ConfigError ? `${error.name}: ${oneLine(error.message, 500)}` : describeFailure(error));
+      return error instanceof ConfigError ? 2 : 1;
     }
   }
   const config = parsed.config as ChatConfig;
   const chatIo: ChatIo = { env: io.env, readFile: io.readFile, ...(config.approve === "ask" && io.isTTY ? { ask: io.ask } : {}) };
   let setup: Setup | undefined;
   try {
+    // A bad token setting fails before any tool server starts.
+    const remote = parsed.command === "mcp" && parsed.remote !== undefined ? clientFor(parsed.remote, io.env) : undefined;
     setup = await buildSetup(config, chatIo);
     for (const skip of setup.skipped.slice(0, MAX_SKIPPED_LINES)) io.err(`skipped tool ${oneLine(skip.name, 100)}: ${oneLine(skip.reason, 200)}`);
     if (setup.skipped.length > MAX_SKIPPED_LINES) io.err(`skipped ${setup.skipped.length - MAX_SKIPPED_LINES} more tools`);
     if (parsed.command === "mcp") {
       const { startAssistantMcp } = await import("./mcp-server.js");
-      const remote = parsed.remote === undefined ? undefined : clientFor(parsed.remote, io.env);
-      await startAssistantMcp(setup, remote); // returns when the client closes its input
+      await startAssistantMcp(setup, remote, { approve: parsed.allowApprove ?? false }); // returns when the client closes its input
       return 0;
     }
     const text = parsed.message ?? (io.isTTY ? undefined : (await io.readStdin()).trim());

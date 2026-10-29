@@ -2,7 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { runChat, type Setup } from "./chat.js";
-import type { AssistantClient } from "./client.js";
+import type { AssistantClient, PendingApproval } from "./client.js";
 import { describeFailure, runRemote, type RemoteCommand } from "./remote.js";
 import { provenanceLabel, provenanceMarker, type Provenance } from "./provenance.js";
 import { VERSION } from "./version.js";
@@ -22,10 +22,11 @@ const TOOL = {
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
 } as const;
 
+const MAX_FIELD_CHARS = 200;
 const NO_ARGS = { type: "object", properties: {}, additionalProperties: false } as const;
-const ID = { type: "string", minLength: 1, maxLength: 200, description: "The id of the pending approval." } as const;
+const ID = { type: "string", minLength: 1, maxLength: MAX_FIELD_CHARS, description: "The id of the pending approval." } as const;
 
-/** Four more tools, served only when the host points the server at a running assistant API. */
+/** More tools, served only when the host points the server at a running assistant API. */
 const REMOTE_TOOLS = [
   {
     name: "assistant_tools",
@@ -42,10 +43,10 @@ const REMOTE_TOOLS = [
   {
     name: "assistant_approve",
     description:
-      "Approve one pending call by id and digest. Use it only when a person told you to. Never approve a call that you or your own run proposed. The API refuses an agent without the assistant:admin scope.",
+      "Approve one pending call by id and digest. Use it only when a person told you to. Never approve a call that you or your own run proposed. Served only when the host started the server with --allow-approve.",
     inputSchema: {
       type: "object",
-      properties: { id: ID, digest: { type: "string", minLength: 1, maxLength: 200, description: "The digest of the exact call, from assistant_approvals." } },
+      properties: { id: ID, digest: { type: "string", minLength: 1, maxLength: MAX_FIELD_CHARS, description: "The digest of the exact call, from assistant_approvals." } },
       required: ["id", "digest"],
       additionalProperties: false,
     },
@@ -60,18 +61,25 @@ const REMOTE_TOOLS = [
       required: ["id"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   },
 ] as const;
-
+const APPROVE = "assistant_approve";
 const fail = (text: string) => ({ isError: true, content: [{ type: "text" as const, text }] });
+
+/** Quotes the arguments of a pending call as data, like the loop does for a tool result. `<` is escaped. */
+function quotePending(data: { approvals: PendingApproval[] }): unknown {
+  return {
+    approvals: data.approvals.map((a) => ({ ...a, input: `<tool_output tool="${a.tool.replace(/[<"]/g, "")}">\n${JSON.stringify(a.input).replace(/</g, "\\u003c")}\n</tool_output>` })),
+  };
+}
 
 /** Reads the arguments of a remote tool call, or says what is wrong. */
 function remoteCommand(name: string, args: Record<string, unknown> | undefined): RemoteCommand | string {
   const text = (key: string, required: boolean): string | undefined | null => {
     const value = args?.[key];
     if (value === undefined && !required) return undefined;
-    return typeof value === "string" && value !== "" && value.length <= 500 ? value : null;
+    return typeof value === "string" && value !== "" && value.length <= (key === "reason" ? 500 : MAX_FIELD_CHARS) ? value : null;
   };
   switch (name) {
     case "assistant_tools":
@@ -94,18 +102,19 @@ function remoteCommand(name: string, args: Record<string, unknown> | undefined):
 
 /**
  * An MCP server with the tool `assistant_chat`. Each call starts a new conversation. With a `remote` client it
- * also serves `assistant_tools`, `assistant_approvals`, `assistant_approve`, and `assistant_deny`.
+ * also serves `assistant_tools`, `assistant_approvals`, and `assistant_deny`. `assistant_approve` needs `allow.approve`.
  */
-export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal, remote?: AssistantClient): Server {
+export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal, remote?: AssistantClient, allow: { approve?: boolean } = {}): Server {
+  const offered = remote ? REMOTE_TOOLS.filter((tool) => tool.name !== APPROVE || allow.approve === true) : [];
   const server = new Server({ name: "agentic-assistant", version: VERSION }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: remote ? [TOOL, ...REMOTE_TOOLS] : [TOOL] }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [TOOL, ...offered] }));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    if (remote && REMOTE_TOOLS.some((tool) => tool.name === request.params.name)) {
+    if (remote && offered.some((tool) => tool.name === request.params.name)) {
       const command = remoteCommand(request.params.name, request.params.arguments);
       if (typeof command === "string") return fail(command);
       try {
         const { data } = await runRemote(remote, command);
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify(command.name === "approvals" ? quotePending(data as { approvals: PendingApproval[] }) : data) }] };
       } catch (error) {
         return fail(describeFailure(error));
       }
@@ -148,9 +157,9 @@ export function createAssistantMcpServer(setup: Setup, shutdown?: AbortSignal, r
 }
 
 /** Serves on stdio. Resolves when the client closes its input, or the transport closes. */
-export async function startAssistantMcp(setup: Setup, remote?: AssistantClient): Promise<void> {
+export async function startAssistantMcp(setup: Setup, remote?: AssistantClient, allow?: { approve?: boolean }): Promise<void> {
   const shutdown = new AbortController();
-  const server = createAssistantMcpServer(setup, shutdown.signal, remote);
+  const server = createAssistantMcpServer(setup, shutdown.signal, remote, allow);
   const ended = new Promise<void>((resolve) => {
     server.onclose = resolve;
     process.stdin.once("end", resolve);

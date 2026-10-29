@@ -157,15 +157,13 @@ A running assistant API holds the calls that wait for a person. Four CLI command
 
 ```sh
 export ASSISTANT_TOKEN=...
-agentic-assistant tools     --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
 agentic-assistant approvals --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
 agentic-assistant approve <id> --digest <digest> --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
-agentic-assistant deny <id> --reason "not now" --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
 ```
 
-`approvals` prints the id and the digest of each call. `approve` needs the digest, so you approve the exact call you read. A wrong digest is a conflict and the call does not run. A denial is final. Add `--json` for JSON. Exit codes: 0 done, 1 the API refused or failed, 2 bad usage.
+`tools` lists the tools, `approvals` prints the id and digest of each waiting call, `approve` needs that digest so you approve the exact call you read, and `deny <id> --reason ...` is final. Add `--json` for JSON. Exit codes: 0 done, 1 the API refused or failed, 2 bad usage.
 
-Start the MCP server with `--api` and `--api-token-env` and it also offers `assistant_tools`, `assistant_approvals`, `assistant_approve`, and `assistant_deny`. They act with the token you gave. An agent token needs the `assistant:admin` scope to decide. Do not give the server a token that lets the assistant approve its own call.
+Start the MCP server with `--api` and `--api-token-env` and it also offers `assistant_tools`, `assistant_approvals`, and `assistant_deny`. They act with the token you gave. `assistant_approvals` returns the arguments of each call quoted as data. `assistant_approve` is off unless you add `--allow-approve`. An AI client could use it to approve a call in the name of the token's owner. So use a token for an agent, which needs the `assistant:admin` scope and is recorded as machine-made. Never give it a person's token.
 
 ## Run it as a hosted HTTP API
 

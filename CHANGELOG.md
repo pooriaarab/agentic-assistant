@@ -4,8 +4,8 @@
 
 Added
 
-- CLI commands `tools`, `approvals`, `approve <id> --digest <d>`, and `deny <id>`. They call a running assistant API with `--api <url>` and `--api-token-env <NAME>`, and print text or `--json`.
-- With `--api` and `--api-token-env`, `agentic-assistant mcp` also serves `assistant_tools`, `assistant_approvals`, `assistant_approve`, and `assistant_deny`.
+- CLI commands `tools`, `approvals`, `approve <id> --digest <d>`, and `deny <id>`. They call a running assistant API with `--api <url>` and `--api-token-env <NAME>`.
+- With those flags, `agentic-assistant mcp` also serves `assistant_tools`, `assistant_approvals`, and `assistant_deny`. `--allow-approve` adds `assistant_approve`.
 
 ## 0.4.0
 
