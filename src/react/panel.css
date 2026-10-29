@@ -2,7 +2,8 @@
    agentic-design/tokens.css once on the page. Override --aa-* on .agd-assistant or a parent to match your app.
    Without the tokens, each variable falls back to a system color, so focus and borders stay visible.
    The look is calm: soft borders on cards, a strong edge only on the text field and the buttons that need one,
-   and the --agd-* space, radius, and type scale. Every token pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks it.
+   and the --agd-* space, radius, and type scale. Each text, edge, and focus pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks them.
+   --aa-border is decoration only and is not checked, so do not use it for an edge people must see.
    No remote fonts or images. */
 .agd-assistant {
   --aa-bg: var(--agd-color-surface, Canvas);
@@ -47,11 +48,10 @@
 .agd-assistant__text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agd-assistant__badge { display: inline-block; padding: 0 var(--agd-space-2, 0.5rem); border-radius: var(--agd-radius-full, 9999px); background: var(--aa-machine-bg); color: var(--aa-machine-fg); font-size: var(--agd-font-size-xs, 0.75rem); font-weight: 600; line-height: 1.5rem; border: 1px solid transparent; }
 .agd-assistant__card, .agd-assistant__approval { padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); background: var(--aa-card-bg); }
-.agd-assistant__approval { box-shadow: var(--aa-shadow); }
 .agd-assistant__card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--agd-space-2, 0.5rem); }
 .agd-assistant__status { color: var(--aa-muted); font-size: var(--agd-font-size-sm, 0.875rem); font-weight: 600; }
 .agd-assistant__pre { margin: var(--agd-space-1, 0.25rem) 0 0; padding: var(--agd-space-2, 0.5rem); max-height: 12rem; overflow: auto; background: var(--aa-bg); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-sm, 0.25rem); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--agd-font-family-mono, ui-monospace, Menlo, Consolas, monospace); font-size: var(--agd-font-size-sm, 0.875rem); }
-.agd-assistant__approval { background: var(--aa-warn-bg); color: var(--aa-warn-fg); border-color: var(--aa-warn-fg); }
+.agd-assistant__approval { background: var(--aa-warn-bg); color: var(--aa-warn-fg); border-width: 2px; border-color: var(--aa-warn-fg); box-shadow: var(--aa-shadow); }
 .agd-assistant__approval-title { margin: 0 0 var(--agd-space-1, 0.25rem); font-size: 1rem; display: flex; align-items: center; gap: var(--agd-space-2, 0.5rem); }
 .agd-assistant__warn { color: var(--aa-danger); background: var(--aa-bg); padding: var(--agd-space-1, 0.25rem) var(--agd-space-2, 0.5rem); border: 1px solid var(--aa-danger); border-radius: var(--agd-radius-sm, 0.25rem); }
 .agd-assistant__notice { margin: 0; padding: var(--agd-space-3, 0.75rem) var(--agd-space-4, 1rem); border: 1px solid var(--aa-border); border-radius: var(--agd-radius-md, 0.5rem); }
