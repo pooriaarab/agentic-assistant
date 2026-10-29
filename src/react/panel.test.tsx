@@ -8,14 +8,17 @@ import { AssistantPanel } from "./index.js";
 
 // Ways the panel can fail. Each one is a case below.
 // 1. Streamed text does not show as it arrives, or shows twice.
-// 2. A part the assistant made (message, tool card, approval, notice) is not labeled machine-made, or a person's own message is.
+// 2. A part the assistant made (message, tool card, approval) is not labeled machine-made, or a person's own message is.
 // 3. Tool output or arguments render as HTML (a script or an image tag would run).
 // 4. An approval prompt does not show the exact arguments or the risk, or has no accessible name.
 // 5. A keyboard user cannot reach the prompt, or loses their place after a decision.
 // 6. A double submit starts two runs. Enter does not send, or Shift+Enter does.
 // 7. Stop does not abort the run. An error in the run leaves the panel stuck or loses the messages.
 // 8. A failed decision hides the prompt, so the person cannot try again.
-// 9. The next message does not carry the earlier conversation.
+// 9. The next message does not carry the earlier conversation, or loses the message of a failed run.
+// 10. A prompt stays clickable after its run ended (Stop, an error, closing the panel), or a stale card turns to waiting again.
+// 11. A timeout or a gate failure shows as "Declined", as if a person refused.
+// 12. Focus leaves the prompt when the decision did not go through. A double click sends two decisions.
 
 afterEach(cleanup);
 
@@ -267,6 +270,119 @@ describe("assistant panel", () => {
     await waitFor(() => expect(seen).toEqual([1]));
     await user.type(composer(), "two{Enter}");
     await waitFor(() => expect(seen).toEqual([1, 3]));
+  });
+
+  test("Stop during a pending approval closes the prompt and marks the card", async () => {
+    const { run, decide, gate } = realAssistant([{ toolCalls: [{ name: "notes_write", input: {} }] }, { text: "ok" }], [{ name: "notes_write", risk: "risky" }]);
+    const user = userEvent.setup();
+    render(<AssistantPanel run={run} decide={decide} />);
+    await user.type(composer(), "go{Enter}");
+    await screen.findByRole("button", { name: "Approve notes_write" });
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText(/You stopped the assistant/);
+    expect(screen.queryByRole("button", { name: "Approve notes_write" })).toBeNull();
+    expect(screen.getByText(/Expired/)).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Tool call: notes_write" })).getByText("Not run")).toBeTruthy();
+    expect(gate.pending()).toEqual([]);
+  });
+
+  test("an error in the run closes a pending prompt", async () => {
+    const feed = new Feed();
+    const user = userEvent.setup();
+    render(<AssistantPanel run={() => feed} decide={noDecide} />);
+    await user.type(composer(), "go{Enter}");
+    feed.push({ type: "tool_call", id: "c1", name: "notes_write", input: {}, actor });
+    feed.push({ type: "approval_request", request: { id: "r1", tool: "notes_write", risk: "risky", input: {}, digest: "d", actor } });
+    await screen.findByRole("button", { name: "Approve notes_write" });
+    feed.end();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve notes_write" })).toBeNull());
+    expect(screen.getByText(/Expired/)).toBeTruthy();
+  });
+
+  test("a stale card does not wait for approval again in a later run", async () => {
+    const feeds = [new Feed(), new Feed()];
+    let call = 0;
+    const user = userEvent.setup();
+    render(<AssistantPanel run={() => feeds[call++] as Feed} decide={noDecide} />);
+    const ask = (feed: Feed, id: string) => {
+      feed.push({ type: "tool_call", id, name: "notes_write", input: {}, actor });
+      feed.push({ type: "approval_request", request: { id: `r-${id}`, tool: "notes_write", risk: "risky", input: {}, digest: "d", actor } });
+    };
+    await user.type(composer(), "one{Enter}");
+    ask(feeds[0] as Feed, "c1");
+    await screen.findByRole("button", { name: "Approve notes_write" });
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    feeds[0]?.push(done("aborted"));
+    feeds[0]?.end();
+    await screen.findByText(/You stopped the assistant/);
+    await user.type(composer(), "two{Enter}");
+    ask(feeds[1] as Feed, "c2");
+    await screen.findByRole("button", { name: "Approve notes_write" });
+    expect(screen.getAllByText("Waiting for approval")).toHaveLength(1);
+    expect(screen.getAllByText("Not run")).toHaveLength(1);
+    feeds[1]?.end();
+  });
+
+  test("a timeout or a gate failure does not read as a person's decline", async () => {
+    const gate = { request: () => new Promise<never>(() => undefined) };
+    const registry = new ToolRegistry().register({ name: "notes_write", description: "d", inputSchema: { type: "object" }, scope: "notes:write", risk: "risky", handler: () => "ran" });
+    const provider = new ScriptedProvider([{ toolCalls: [{ name: "notes_write", input: {} }] }, { text: "ok" }]);
+    const principal = createPrincipal({ id: "agent:a1", kind: "agent_of_human", parentId: "human:alice", scopes: ["notes:write"] });
+    const user = userEvent.setup();
+    render(
+      <AssistantPanel
+        run={(messages, signal) => runAssistant({ provider, registry, principal, messages, approvals: gate, signal, limits: { approvalTimeoutMs: 100 } })}
+        decide={noDecide}
+      />,
+    );
+    await user.type(composer(), "go{Enter}");
+    expect(await screen.findByText(/Not approved\. The approval did not complete/)).toBeTruthy();
+    expect(screen.queryByText("Declined")).toBeNull();
+  });
+
+  test("closing the panel aborts the run", async () => {
+    let signalSeen: AbortSignal | undefined;
+    const feed = new Feed();
+    const user = userEvent.setup();
+    const { unmount } = render(<AssistantPanel run={(_m, signal) => ((signalSeen = signal), feed)} decide={noDecide} />);
+    await user.type(composer(), "long{Enter}");
+    await waitFor(() => expect(signalSeen).toBeDefined());
+    unmount();
+    expect(signalSeen?.aborted).toBe(true);
+    feed.end();
+  });
+
+  test("a decision that fails keeps focus in the prompt, and a double click sends one decision", async () => {
+    const { run } = realAssistant([{ toolCalls: [{ name: "notes_write", input: {} }] }, { text: "ok" }], [{ name: "notes_write", risk: "risky" }]);
+    const decide = vi.fn(() => new Promise<void>((_, reject) => setTimeout(() => reject(new Error("offline")), 30)));
+    const user = userEvent.setup();
+    render(<AssistantPanel run={run} decide={decide} />);
+    await user.type(composer(), "go{Enter}");
+    const approve = await screen.findByRole("button", { name: "Approve notes_write" });
+    await user.dblClick(approve);
+    await screen.findByText(/decision could not be sent/);
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(composer());
+  });
+
+  test("a failed run still carries the person's message into the next run", async () => {
+    const seen: number[] = [];
+    let first = true;
+    const run = (messages: Message[]) =>
+      (async function* (): AsyncGenerator<AssistantEvent> {
+        seen.push(messages.length);
+        if (first) {
+          first = false;
+          throw new Error("down");
+        }
+        yield done();
+      })();
+    const user = userEvent.setup();
+    render(<AssistantPanel run={run} decide={noDecide} />);
+    await user.type(composer(), "one{Enter}");
+    await screen.findByText(/could not finish/);
+    await user.type(composer(), "two{Enter}");
+    await waitFor(() => expect(seen).toEqual([1, 2]));
   });
 
   test("has named landmarks, a live log, and labeled controls", () => {

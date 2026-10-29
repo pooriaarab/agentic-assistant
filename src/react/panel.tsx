@@ -24,6 +24,7 @@ const TOOL_STATUS: Record<Extract<PanelItem, { kind: "tool" }>["status"], string
   done: "Done",
   failed: "Failed",
   denied: "Not allowed",
+  not_run: "Not run",
 };
 
 function ToolCard({ item }: { item: Extract<PanelItem, { kind: "tool" }> }) {
@@ -52,7 +53,7 @@ function ApprovalPrompt({
   focusComposer,
 }: {
   item: Extract<PanelItem, { kind: "approval" }>;
-  decide: (id: string, approved: boolean) => void;
+  decide: (id: string, approved: boolean) => Promise<boolean>;
   focusComposer: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -61,10 +62,17 @@ function ApprovalPrompt({
   useLayoutEffect(() => {
     if (item.status === "pending") ref.current?.focus();
   }, [item.status]);
-  const pending = item.status === "pending";
+  // Focus leaves the prompt only after the host took the decision. If it fails, the prompt stays open.
   const answer = (approved: boolean) => {
-    decide(item.id, approved);
-    focusComposer();
+    void decide(item.id, approved).then((taken) => {
+      if (taken) focusComposer();
+    });
+  };
+  const outcome: Record<Exclude<typeof item.status, "pending">, string> = {
+    approved: `Approved${item.decidedBy ? ` by ${item.decidedBy}` : ""}`,
+    declined: "Declined",
+    unavailable: "Not approved. The approval did not complete, so the action did not run.",
+    expired: "Expired. The assistant stopped before you decided, so the action did not run.",
   };
   return (
     <div className="aa-approval" role="group" aria-labelledby={headingId} tabIndex={-1} ref={ref} data-machine-made="true">
@@ -82,7 +90,7 @@ function ApprovalPrompt({
         <p>This can change data.</p>
       )}
       <pre className="aa-pre" tabIndex={0} aria-label={`Exact arguments for ${item.tool}`}>{pretty(item.input)}</pre>
-      {pending ? (
+      {item.status === "pending" ? (
         <div className="aa-actions">
           <button type="button" className="aa-button aa-primary" disabled={item.busy} aria-label={`Approve ${item.tool}`} onClick={() => answer(true)}>
             Approve
@@ -92,7 +100,7 @@ function ApprovalPrompt({
           </button>
         </div>
       ) : (
-        <p className="aa-status">{item.status === "approved" ? `Approved${item.decidedBy ? ` by ${item.decidedBy}` : ""}` : "Declined"}</p>
+        <p className="aa-status">{outcome[item.status]}</p>
       )}
     </div>
   );
@@ -166,7 +174,7 @@ export function AssistantPanel({ title = "AI assistant", run, decide }: Assistan
             case "tool":
               return <ToolCard key={item.id} item={item} />;
             case "approval":
-              return <ApprovalPrompt key={item.id} item={item} decide={(id, approved) => void decideRequest(id, approved)} focusComposer={() => input.current?.focus()} />;
+              return <ApprovalPrompt key={item.id} item={item} decide={decideRequest} focusComposer={() => input.current?.focus()} />;
             case "notice":
               return (
                 <p key={item.id} className="aa-notice">

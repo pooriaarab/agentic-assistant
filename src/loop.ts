@@ -372,26 +372,39 @@ interface Outcome {
 }
 
 /** Asks the gate and waits. A failure or a missed deadline is an error, and the caller refuses the call. */
-async function awaitDecision(gate: ApprovalGate, request: ApprovalRequest, parent: AbortSignal | undefined, ms: number): Promise<ApprovalDecision> {
+function startDecision(
+  gate: ApprovalGate,
+  request: ApprovalRequest,
+  parent: AbortSignal | undefined,
+  ms: number,
+): { promise: Promise<ApprovalDecision>; cancel(): void } {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
-  if (parent?.aborted) throw new Error("the run was aborted");
-  parent?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await Promise.race([
-      gate.request(request, controller.signal),
-      new Promise<never>((_, reject) => {
-        const stop = () => reject(new Error("no decision before the deadline"));
-        // The gate may have aborted already, while it was being called.
-        if (controller.signal.aborted) stop();
-        else controller.signal.addEventListener("abort", stop, { once: true });
-      }),
-    ]);
-  } finally {
+  const cancel = () => {
     clearTimeout(timer);
     parent?.removeEventListener("abort", onAbort);
-  }
+    controller.abort();
+  };
+  const promise = (async () => {
+    if (parent?.aborted) throw new Error("the run was aborted");
+    parent?.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await Promise.race([
+        gate.request(request, controller.signal),
+        new Promise<never>((_, reject) => {
+          const stop = () => reject(new Error("no decision before the deadline"));
+          // The gate may have aborted already, while it was being called.
+          if (controller.signal.aborted) stop();
+          else controller.signal.addEventListener("abort", stop, { once: true });
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", onAbort);
+    }
+  })();
+  return { promise, cancel };
 }
 
 async function* runCall(ctx: CallContext, call: { id: string; name: string; input: unknown }): AsyncGenerator<AssistantEvent, Outcome> {
@@ -425,19 +438,24 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       actor: ctx.actor,
     });
     // The gate gets the request before the event is shown, so a consumer can decide in the loop body.
-    const waiting = awaitDecision(ctx.gate, request, signal, ctx.limits.approvalTimeoutMs);
-    waiting.catch(() => undefined);
-    yield { type: "approval_request", request };
+    const waiting = startDecision(ctx.gate, request, signal, ctx.limits.approvalTimeoutMs);
+    waiting.promise.catch(() => undefined);
     let why: string | undefined;
     let decidedBy: string | undefined;
     let declineReason: string | undefined;
     try {
-      const decision = await waiting;
-      why = refuseDecision(decision, request, principal.id);
-      if (typeof decision.decidedBy === "string") decidedBy = decision.decidedBy;
-      if (decision.approved === false && typeof decision.reason === "string") declineReason = decision.reason;
-    } catch (error) {
-      why = `the approval failed: ${error instanceof Error ? error.message : String(error)}`;
+      yield { type: "approval_request", request };
+      try {
+        const decision = await waiting.promise;
+        why = refuseDecision(decision, request, principal.id);
+        if (typeof decision.decidedBy === "string") decidedBy = decision.decidedBy;
+        if (decision.approved === false && typeof decision.reason === "string") declineReason = decision.reason;
+      } catch (error) {
+        why = `the approval failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } finally {
+      // If the consumer stops reading at the request, the gate must not keep it pending.
+      waiting.cancel();
     }
     if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
     yield {

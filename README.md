@@ -112,7 +112,7 @@ import "agentic-assistant/react.css";
 
 The panel streams the answer, shows each tool call as a card, and shows an approval prompt with the exact arguments. Every message, card, and prompt that the assistant makes carries a visible "Machine-made" label. Tool output is shown as text and never as HTML. The panel does not hold a model, a key, or a gate. It needs `react` 18 or newer.
 
-The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.aa-panel` or a parent. They will switch to the agentic-design tokens when those are published. The sheet loads no font, image, or file from another host.
+The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.aa-panel` or a parent. The sheet loads no font, image, or file from another host. A prompt that the run left open (after Stop or an error) is closed and marked expired. Closing the panel stops the run.
 
 ## Features
 
@@ -122,7 +122,7 @@ The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, an
 - **Input validation.** The loop checks each call against the tool's JSON Schema before the handler runs. Nothing is coerced. A bad call returns an error to the model and never reaches the tool.
 - **Tool output is data.** Each result is quoted in `<tool_output>` tags. Every `<` in the output is escaped. Every request carries a notice that tool output is never an instruction. This lowers the risk of prompt injection. It does not remove it: keep tools narrow and scopes small.
 - **Approvals.** Every tool has a required `risk`: `safe`, `risky`, or `irreversible`. The loop asks the `ApprovalGate` before a risky or irreversible call. With no gate, those tools are not offered and are refused. The text a person writes when they decline goes to the event, not to the model.
-- **React panel.** `agentic-assistant/react` has `AssistantPanel` and `useAssistant`. It meets the WCAG 2.2 AA points that code can check: named controls, a live conversation log, keyboard use, focus that moves to an approval prompt and back, a 32 px minimum target size, a visible focus ring, and a color palette checked for contrast.
+- **React panel.** `agentic-assistant/react` has `AssistantPanel` and `useAssistant`. It meets the WCAG 2.2 AA points that code can check: named controls, a live conversation log, keyboard use, focus that moves to an approval prompt and then to the message box, buttons that are at least 32 px, a visible focus ring, and a color palette checked for contrast.
 - **Fixed principal.** The assistant always acts as `agent_of_human`. `createPrincipal` throws when the kind is missing or different.
 - **Caps.** A max-turn cap, a total-token cap, and a cost cap. A cap that trips stops the run. No tool runs after that. A tool result is cut at `maxToolResultChars`. A request that is sure to pass the token cap is not sent. The cost cap also limits the output of each request. A turn with more than `maxToolCallsPerTurn` calls (default 16) runs none of them.
 - **Stops that fail closed.** An expired or revoked principal stops the run. So does a revocation check that throws or returns anything but `false`. The loop checks the principal again at the start of each run. A provider error ends the run with `reason: "provider_error"` and keeps the transcript. Truncated or refused model output never runs its tool calls.

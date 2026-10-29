@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ToolRisk } from "../approvals.js";
 import type { AssistantEvent, DoneReason } from "../loop.js";
 import type { Message } from "../types.js";
@@ -11,7 +11,7 @@ export type PanelItem =
       id: string;
       name: string;
       input: unknown;
-      status: "running" | "waiting" | "done" | "failed" | "denied";
+      status: "running" | "waiting" | "done" | "failed" | "denied" | "not_run";
       /** Text a tool returned. It is data. Show it as text. */
       content?: string;
     }
@@ -21,7 +21,8 @@ export type PanelItem =
       tool: string;
       risk: Exclude<ToolRisk, "safe">;
       input: unknown;
-      status: "pending" | "approved" | "declined";
+      /** `expired`: the run ended before a decision was used. `unavailable`: the approval did not complete. */
+      status: "pending" | "approved" | "declined" | "unavailable" | "expired";
       busy: boolean;
       decidedBy?: string;
     }
@@ -78,6 +79,7 @@ export function useAssistant(options: UseAssistantOptions) {
     let streamingId: string | null = null;
     let finished = false;
     const toolItems = new Map<string, string>();
+    let lastToolItem: string | null = null;
     try {
       for await (const event of latest.current.run(sent, abort.signal)) {
         switch (event.type) {
@@ -100,18 +102,27 @@ export function useAssistant(options: UseAssistantOptions) {
           case "tool_call": {
             const id = nextId();
             toolItems.set(event.id, id);
+            lastToolItem = id;
             add({ kind: "tool", id, name: event.name, input: event.input, status: "running" });
             break;
           }
           case "approval_request": {
             const { request } = event;
             add({ kind: "approval", id: request.id, tool: request.tool, risk: request.risk, input: request.input, status: "pending", busy: false });
-            setItems((current) => current.map((item) => (item.kind === "tool" && item.name === request.tool && item.status === "running" ? { ...item, status: "waiting" } : item)));
+            const waitingId = lastToolItem;
+            if (waitingId !== null) update(waitingId, (item) => (item.kind === "tool" && item.status === "running" ? { ...item, status: "waiting" } : item));
             break;
           }
           case "approval_decision":
             update(event.requestId, (item) =>
-              item.kind === "approval" ? { ...item, status: event.approved ? "approved" : "declined", busy: false, decidedBy: event.decidedBy } : item,
+              item.kind === "approval"
+                ? {
+                    ...item,
+                    status: event.approved ? "approved" : event.reason === "the person declined" ? "declined" : "unavailable",
+                    busy: false,
+                    decidedBy: event.decidedBy,
+                  }
+                : item,
             );
             break;
           case "tool_result": {
@@ -140,6 +151,14 @@ export function useAssistant(options: UseAssistantOptions) {
       add({ kind: "notice", id: nextId(), text: RUN_FAILED });
     } finally {
       if (!finished) history.current = sent;
+      // A prompt or a card that the run left open can never finish. Say so.
+      setItems((current) =>
+        current.map((item) => {
+          if (item.kind === "approval" && item.status === "pending") return { ...item, status: "expired", busy: false };
+          if (item.kind === "tool" && (item.status === "running" || item.status === "waiting")) return { ...item, status: "not_run" };
+          return item;
+        }),
+      );
       busy.current = false;
       controller.current = null;
       setRunning(false);
@@ -148,13 +167,19 @@ export function useAssistant(options: UseAssistantOptions) {
 
   const stop = useCallback(() => controller.current?.abort(), []);
 
-  const decide = useCallback(async (requestId: string, approved: boolean, reason?: string) => {
+  // Closing the panel ends the run. Nothing keeps spending behind a closed panel.
+  useEffect(() => () => controller.current?.abort(), []);
+
+  /** Resolves true when the host took the decision, and false when it failed. */
+  const decide = useCallback(async (requestId: string, approved: boolean, reason?: string): Promise<boolean> => {
     update(requestId, (item) => (item.kind === "approval" ? { ...item, busy: true } : item));
     try {
       await latest.current.decide(requestId, approved, reason);
+      return true;
     } catch {
       update(requestId, (item) => (item.kind === "approval" ? { ...item, busy: false } : item));
       add({ kind: "notice", id: nextId(), text: DECIDE_FAILED });
+      return false;
     }
   }, []);
 

@@ -318,6 +318,20 @@ describe("approvals", () => {
     expect(done(events).messages.at(-1)?.content).toEqual([{ type: "tool_result", toolUseId: "call_1_0", content: "not run: aborted", isError: true }]);
   });
 
+  test("a consumer that stops reading at the request leaves nothing pending", async () => {
+    const gate = new QueueApprovalGate();
+    const { provider, write: handler } = setup([write(), { text: "ok" }], gate);
+    const registry = new ToolRegistry().register({ name: "notes_write", description: "d", inputSchema: { type: "object" }, scope: "notes:write", risk: "risky", handler });
+    for await (const event of runAssistant({ provider, registry, principal: principal(), approvals: gate, messages: [] })) {
+      if (event.type === "approval_request") {
+        expect(gate.pending()).toHaveLength(1);
+        break;
+      }
+    }
+    expect(gate.pending()).toEqual([]);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   test("a timeout clears the queue", async () => {
     const gate = new QueueApprovalGate();
     const { run } = setup([write(), { text: "ok" }], gate, { approvalTimeoutMs: 100 });
