@@ -7,8 +7,8 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: version 0.1.0 is the first release. The core loop, the tool sources, approvals, and the React panel work.
-> This branch adds the chat CLI and the MCP server. There is no hosted HTTP API yet.
+> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, and the MCP server work.
+> There is no hosted HTTP API yet.
 
 ## Install
 

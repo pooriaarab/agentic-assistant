@@ -158,6 +158,7 @@ describe("usage and exit codes", () => {
     ["a bad limit", ["chat", "--tools", "x", "--scope", "a:read", "--tool-scope", "a:read", "--max-turns", "0", "go"], /--max-turns needs a positive whole number/],
     ["a bad pre-approval", ["chat", "--tools", "x", "--scope", "a:read", "--tool-scope", "a:read", "--approve-call", "nope", "go"], /--approve-call needs JSON/],
     ["a key in an argument", ["chat", "--tools", "x", "--scope", "a:read", "--tool-scope", "a:read", "--api-key", "sk-SECRET", "go"], /Unknown option/i],
+    ["a plain http tool server on a remote host", ["chat", "--tools", "http://notes.example.eu/mcp", "--tools-header-env", "authorization=NOTES_TOKEN", "--scope", "a:read", "--tool-scope", "a:read", "--provider", "scripted", "--script", script([{ text: "hi" }]), "go"], /--tools needs an https URL/],
     ["an unknown command", ["frobnicate"], /unknown command/],
     ["openai-compatible with no base url", ["chat", "--tools", "http://127.0.0.1:1/mcp", "--scope", "a:read", "--tool-scope", "a:read", "--provider", "openai-compatible", "go"], /needs --base-url and --model/],
     ["anthropic with no endpoint choice", ["chat", "--tools", "http://127.0.0.1:1/mcp", "--scope", "a:read", "--tool-scope", "a:read", "go"], /useDefaultEndpoint|apiKey/],

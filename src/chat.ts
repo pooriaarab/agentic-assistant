@@ -57,9 +57,21 @@ export interface Setup {
   close(): Promise<void>;
 }
 
+function isSecureUrl(target: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:") return true;
+  return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+}
+
 /** An http(s) URL is an HTTP server. A JSON array of strings, or words split on spaces, is a command. */
 export function parseTarget(target: string, headerEnv: string[], env: ChatIo["env"]): McpTransportConfig {
   if (/^https?:\/\//i.test(target)) {
+    if (!isSecureUrl(target)) throw new ConfigError("--tools needs an https URL, or http on localhost only");
     const headers: Record<string, string> = {};
     for (const entry of headerEnv) {
       const [name, variable] = entry.split("=", 2);
