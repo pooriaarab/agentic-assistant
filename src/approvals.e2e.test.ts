@@ -92,6 +92,55 @@ describe("approvals", () => {
     expect(done(events).reason).toBe("end_turn");
   });
 
+  test("a person can decide in the loop body, as soon as the request is shown", async () => {
+    const gate = new QueueApprovalGate();
+    const { write: handler, provider } = setup([write(), { text: "ok" }], gate);
+    const events: AssistantEvent[] = [];
+    for await (const event of runAssistant({
+      provider,
+      registry: new ToolRegistry().register({ name: "notes_write", description: "d", inputSchema: { type: "object" }, scope: "notes:write", risk: "risky", handler }),
+      principal: principal(),
+      approvals: gate,
+      messages: [],
+    })) {
+      events.push(event);
+      if (event.type === "approval_request") gate.approve(event.request.id, "human:alice");
+    }
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(done(events).reason).toBe("end_turn");
+  });
+
+  test("the request that is shown is frozen", async () => {
+    let frozen: boolean[] = [];
+    const gate = gateOf((request) => {
+      frozen = [Object.isFrozen(request), Object.isFrozen(request.input), Object.isFrozen(request.actor)];
+      return { requestId: request.id, approved: true, digest: request.digest, decidedBy: "human:alice" };
+    });
+    const { run } = setup([write(), { text: "ok" }], gate);
+    await run();
+    expect(frozen).toEqual([true, true, true]);
+  });
+
+  test("a decision with a getter that throws is a refusal, not a crash", async () => {
+    const hostile = { get requestId(): string { throw new Error("boom"); } };
+    const { write: handler, run } = setup([write(), { text: "ok" }], gateOf(() => hostile));
+    const events = await run();
+    expect(handler).not.toHaveBeenCalled();
+    expect(results(events)[0]).toMatchObject({ denied: "approval" });
+    expect(done(events).reason).toBe("end_turn");
+  });
+
+  test("input nested too deeply is refused, not a crash", async () => {
+    let input: Record<string, unknown> = {};
+    for (let i = 0; i < 20_000; i++) input = { x: input };
+    const gate = { request: vi.fn() };
+    const { write: handler, run } = setup([{ toolCalls: [{ name: "notes_write", input: { id: "a", ...input } }] }, { text: "ok" }], gate);
+    const events = await run();
+    expect(handler).not.toHaveBeenCalled();
+    expect(gate.request).not.toHaveBeenCalled();
+    expect(done(events)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("too deeply nested") });
+  });
+
   test("a declined call does not run, and the reason stays away from the model", async () => {
     const gate = new QueueApprovalGate();
     const { write: handler, provider, run } = setup([write(), { text: "ok" }], gate);
@@ -306,6 +355,7 @@ describe("approvals", () => {
     const events = await run();
     const decision = events.find((e) => e.type === "approval_decision") as Extract<AssistantEvent, { type: "approval_decision" }>;
     expect((decision.decidedBy ?? "").length).toBeLessThanOrEqual(500);
+    expect((decision.reason ?? "").length).toBeLessThanOrEqual(500);
     expect((results(events)[0]?.detail ?? "").length).toBeLessThanOrEqual(500);
   });
 });

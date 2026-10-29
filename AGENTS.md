@@ -12,6 +12,7 @@ streams events. The assistant is always an `agent_of_human`. It never holds more
 - SDK: `import { runAssistant } from "agentic-assistant"`.
 - Test provider: `import { ScriptedProvider } from "agentic-assistant/testing"`.
 - MCP tools in: `connectMcpTools({ transport, scope })`. The host names the scope of each tool.
+- React panel: `import { AssistantPanel } from "agentic-assistant/react"`.
 - CLI and MCP server out: not built yet.
 
 Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
