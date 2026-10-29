@@ -68,6 +68,7 @@ describe("panel styles", () => {
     ["edge", "warn-bg", 3],
     ["edge", "hover-bg", 3],
     ["accent-hover", "bg", 3],
+    // The approval prompt's code block (.agd-assistant__pre) draws warn-fg text on bg, so this is a text pair.
     ["warn-fg", "bg", 4.5],
     ["muted", "warn-bg", 4.5],
     ["accent", "warn-bg", 3],

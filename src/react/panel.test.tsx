@@ -86,7 +86,7 @@ function realAssistant(script: ScriptedTurn[], tools: { name: string; risk: Tool
 const composer = () => screen.getByRole("textbox", { name: "Message the assistant" });
 
 describe("assistant panel", () => {
-  test("streams text as it arrives, and labels it machine-made", async () => {
+  test("streams text as it arrives, and labels it AI-generated", async () => {
     const feed = new Feed();
     const user = userEvent.setup();
     const { container } = render(<AssistantPanel run={() => feed} decide={noDecide} />);
