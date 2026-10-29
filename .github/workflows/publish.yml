@@ -5,6 +5,10 @@ on:
     branches: [release]
   workflow_dispatch: {}
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
