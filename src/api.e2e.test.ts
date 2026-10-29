@@ -15,7 +15,9 @@ import { createWorker } from "./worker.js";
 // 8. The chat is not a stream, or events arrive out of order.
 // 9. A client that hangs up leaves the run and the pending call behind.
 // 10. A key revoked during a run does not stop the run.
-// 11. A bad body, a long message, or a wrong method is accepted.
+// 11. A bad body, a long message, or a wrong method is accepted, or a body with no length is read in full.
+// 12. The pending list shows the arguments of a tool the caller has no scope for.
+// 13. A key that is narrowed during a run keeps its old scopes.
 
 const base = "https://assistant.test/api/v1";
 const ANA = "human:ana";
@@ -173,6 +175,21 @@ describe("chat", () => {
     expect(w.providers).toHaveLength(0);
   });
 
+  test("a body with no length header is cut at the limit", async () => {
+    const w = world([{ text: "x" }]);
+    const token = await w.token(ANA, "human", [ANA], ["notes:read"]);
+    const big = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(40_000)));
+        if (++chunks === 50) controller.close();
+      },
+    });
+    let chunks = 0;
+    const response = await w.worker.fetch(new Request(`${base}/chat`, { method: "POST", body: big, duplex: "half", headers: { authorization: `Bearer ${token}` } } as RequestInit));
+    expect(response.status).toBe(400);
+    expect(chunks).toBeLessThan(50);
+  });
+
   test("a principal may run only a few turns at once", async () => {
     const hang = () => ({ stream: () => new Promise<never>(() => undefined), name: "hang", model: "hang-1" }) as never;
     const w = world(hang);
@@ -289,6 +306,28 @@ describe("approvals", () => {
     expect((await decide(w, request.id, "approve", agent, { digest: request.digest })).status).toBe(403);
     await decide(w, request.id, "deny", ana);
     await stream.all();
+  });
+
+  test("the pending list hides a call whose tool the caller has no scope for", async () => {
+    const { w, request, stream, ana } = await pendingRun();
+    const reader = await w.token("agent:r", "agent_of_human", [ANA, "agent:r"], ["notes:read", "assistant:admin"]);
+    expect(((await (await w.call("/approvals", reader)).json()) as { approvals: unknown[] }).approvals).toEqual([]);
+    expect((await decide(w, request.id, "approve", reader, { digest: request.digest })).status).toBe(403);
+    await decide(w, request.id, "deny", ana);
+    await stream.all();
+  });
+
+  test("a key narrowed during the run stops the run before the tool runs", async () => {
+    const { w, ana, agent, request, stream } = await pendingRun();
+    // The agent's token now resolves to fewer scopes. Other tokens are unchanged.
+    const original = w.memory.auth.authenticate.bind(w.memory.auth);
+    w.memory.auth.authenticate = async (req) =>
+      req.headers.get("authorization") === `Bearer ${agent}`
+        ? { principalId: "agent:a", kind: "agent_of_human", chain: [{ id: ANA, kind: "human" }, { id: "agent:a", kind: "agent_of_human" }], scopes: ["notes:read"] }
+        : original(req);
+    await decide(w, request.id, "approve", ana, { digest: request.digest });
+    expect((await stream.all()).at(-1)?.data.reason).toBe("principal_inactive");
+    expect(w.remove).not.toHaveBeenCalled();
   });
 
   test("a client that hangs up stops the run and leaves no pending call", async () => {

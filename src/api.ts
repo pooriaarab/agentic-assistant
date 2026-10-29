@@ -65,11 +65,26 @@ function toCaller(context: PrincipalContext | null): Caller | undefined {
 
 const assistantId = (caller: Caller): string => `assistant:${caller.id}`;
 
+/** Reads a JSON object body. It stops reading at the byte limit, so a body with no length cannot fill memory. */
 async function readJson(request: Request): Promise<Record<string, unknown> | undefined> {
-  const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > MAX_BODY_BYTES) return undefined;
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return undefined;
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return undefined;
+  let text = "";
+  if (request.body !== null) {
+    const reader = request.body.getReader();
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_BODY_BYTES) {
+        await reader.cancel();
+        return undefined;
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+  }
   try {
     const body: unknown = JSON.parse(text);
     return typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
@@ -147,8 +162,11 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
           kind: "agent_of_human",
           parentId: caller.id,
           scopes: caller.scopes,
-          // Each check asks the Auth again, so a key revoked during a run stops it.
-          isRevoked: async () => toCaller(await options.auth.authenticate(request))?.id !== caller.id,
+          // Each check asks the Auth again. A key revoked during a run, or one with other scopes, stops it.
+          isRevoked: async () => {
+            const now = toCaller(await options.auth.authenticate(request));
+            return now?.id !== caller.id || [...now.scopes].sort().join(" ") !== [...caller.scopes].sort().join(" ");
+          },
         }),
         approvals: gateFor(caller),
         messages: [{ role: "user", content: [{ type: "text", text: message }] }],
@@ -234,8 +252,13 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
         return json({ tools });
       }
       if (route === "approvals" && verb === undefined) {
+        // A call of a tool outside the caller's scopes is not listed, so its arguments stay private.
         const list = [...pending.values()]
           .filter((entry) => entry.proposer.rootId === caller.rootId)
+          .filter((entry) => {
+            const tool = options.registry.get(entry.request.tool);
+            return tool !== undefined && hasScope(caller.scopes, tool.scope);
+          })
           .map((entry) => ({
             id: entry.request.id,
             tool: entry.request.tool,

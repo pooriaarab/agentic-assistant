@@ -153,13 +153,23 @@ Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat
 ## Run it as a hosted HTTP API
 
 ```ts
-// src/index.ts of your Worker
+// src/index.ts of your Worker. `store`, `registry`, and `Env` are yours.
 import { createWorker } from "agentic-assistant/worker";
+import { AnthropicProvider } from "agentic-assistant";
 import { createStoreAuth } from "agentic-identity";
 
+let worker: ReturnType<typeof createWorker> | undefined;
+
 export default {
-  fetch: (request: Request, env: Env) =>
-    createWorker({ auth: createStoreAuth(store(env)), registry, provider: () => new AnthropicProvider({ baseUrl: env.MODEL_URL }) }).fetch(request, env),
+  fetch(request: Request, env: Env) {
+    // Build the worker once. It keeps the pending approvals, so a new one per request would lose them.
+    worker ??= createWorker({
+      auth: createStoreAuth(store(env)),
+      registry,
+      provider: () => new AnthropicProvider({ baseUrl: env.MODEL_URL, apiKey: env.MODEL_KEY }),
+    });
+    return worker.fetch(request, env);
+  },
 };
 ```
 
@@ -173,7 +183,7 @@ Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key 
 | `POST /approvals/:id/approve` `{"digest":"..."}` | Approve the exact call. A wrong digest is a 409. |
 | `POST /approvals/:id/deny` `{"reason":"..."}` | Refuse the call. |
 
-The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. If a client hangs up, the run stops and its pending calls go. If the key is revoked during a run, the run stops before its next tool call.
+The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. The list hides a call whose tool the caller has no scope for. If a client hangs up, the run stops and its pending calls go. If the key is revoked or its scopes change during a run, the run stops before its next tool call.
 
 ## Features
 
