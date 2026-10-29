@@ -13,13 +13,17 @@ import {
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
 
-// US dollars per million tokens, from the published model table of 2026-10-06. Check them
-// before you trust a cost cap, or pass the `pricing` option.
-const KNOWN_PRICING: Record<string, Pricing> = {
-  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
-  "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20 },
-  "claude-haiku-5-5": { inputPerMTok: 0.1, outputPerMTok: 0.5 },
-};
+/** The day someone last compared KNOWN_PRICING with the published model table. Update it with the table. */
+export const PRICING_CHECKED_ON = "2026-10-29";
+
+// US dollars per million tokens, from the published model table. A test fails when the date
+// above is older than 120 days. Pass the `pricing` option to use other prices.
+// Haiku 5.5 is not here on purpose: its price rises for prompts over 100K tokens, and one rate would
+// let a cost cap pass. Pass `pricing` for it.
+export const KNOWN_PRICING: Readonly<Record<string, Readonly<Pricing>>> = Object.freeze({
+  "claude-sonnet-5-5": Object.freeze({ inputPerMTok: 2, outputPerMTok: 10 }),
+  "claude-opus-5-5": Object.freeze({ inputPerMTok: 4, outputPerMTok: 20 }),
+});
 
 export interface AnthropicProviderOptions {
   /** Read from ANTHROPIC_API_KEY when absent. */

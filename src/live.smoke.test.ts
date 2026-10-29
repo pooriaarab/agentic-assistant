@@ -6,6 +6,9 @@ import { AnthropicProvider, ToolRegistry, createPrincipal, runAssistant, type As
 //   AGENTIC_ASSISTANT_LIVE=1 ANTHROPIC_API_KEY=... npx vitest run src/live.smoke.test.ts
 const live = process.env.AGENTIC_ASSISTANT_LIVE === "1" && Boolean(process.env.ANTHROPIC_API_KEY);
 const MODEL = process.env.AGENTIC_ASSISTANT_LIVE_MODEL ?? "claude-haiku-5-5";
+// Haiku has no built-in price. This is its rate for prompts over 100K tokens, the higher one, so a cap errs safe.
+// Other models use the built-in table.
+const HAIKU_PRICING = { inputPerMTok: 0.5, outputPerMTok: 2.5 };
 
 describe.skipIf(!live)("live smoke test (Anthropic API)", () => {
   test("the loop calls a tool and answers, inside its caps", async () => {
@@ -23,12 +26,11 @@ describe.skipIf(!live)("live smoke test (Anthropic API)", () => {
     });
     const events: AssistantEvent[] = [];
     for await (const event of runAssistant({
-      provider: new AnthropicProvider({ model: MODEL, useDefaultEndpoint: true }),
+      provider: new AnthropicProvider({ model: MODEL, useDefaultEndpoint: true, ...(MODEL === "claude-haiku-5-5" ? { pricing: HAIKU_PRICING } : {}) }),
       registry,
       principal: createPrincipal({ id: "agent:live", kind: "agent_of_human", parentId: "human:live", scopes: ["math:read"] }),
       messages: [{ role: "user", content: [{ type: "text", text: "Use the add tool to add 17 and 25. Then tell me the sum in one short sentence." }] }],
       limits: { maxTurns: 4, maxTotalTokens: 20_000, maxCostUsd: 0.25 },
-      // Prices for the default model are built in. Others need `pricing`; Haiku 5.5 is built in.
     })) events.push(event);
     const end = events.at(-1) as Extract<AssistantEvent, { type: "done" }>;
     expect(end.reason, end.error).toBe("end_turn");

@@ -175,7 +175,7 @@ Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat
 - The gate trusts the name that `decidedBy` carries. Your gate must check who the person is. `QueueApprovalGate` does not.
 - An MCP server is trusted for its own output only. The assistant does not sandbox the server process. Run stdio servers you trust.
 - Token and cost caps need the provider to report usage. The OpenAI-compatible adapter throws when the server sends none.
-- A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices are from 2026-10-06. Check them.
+- A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices were checked on 2026-10-29 (`PRICING_CHECKED_ON`). A test fails when that date is over 120 days old. Haiku has no built-in price, because its rate changes with the prompt size. Pass `pricing` for it. Check the prices before you rely on a cap.
 - The token pre-check guesses three characters per token. It is an estimate.
 - A tool error text goes to the `detail` field of the event. The model sees only `tool failed`.
 - A model refusal stops the run. No automatic fallback model is set up.
