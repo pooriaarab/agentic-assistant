@@ -13,7 +13,8 @@ Changed
 - `createStaticTokenAuth` now builds a `createStoreAuth` over a memory Store. The local `Authorization` header parser is gone, so `agentic-identity` reads the credential. A token now also signs in as a `session` cookie, and a write by cookie needs an origin in `origins`. A token map may not use one `id` twice.
 - The demo Worker needs the scope `demo:read` on every `/api/v1` route. A token without it gets a 403. Migration: add `demo:read` to each scope list in `ASSISTANT_TOKENS`.
 - `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color, and the panel loses its blue accent, tinted cards, amber approval box, and red danger color (the risk notice shows in link blue). The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
-- The OpenAI-compatible provider and the MCP tool source have unit tests.
+- The OpenAI-compatible provider skips a chunk or tool-call part that is not an object, so a JSON `null` no longer throws. It gives a tool-call part with no `index` its own call when it has an `id`, and continues the last call when it has none. It cancels the body of a failed response.
+- The MCP tool source has unit tests.
 
 Migration from 0.4.0 (breaking: the auth path changed)
 
@@ -21,6 +22,7 @@ Migration from 0.4.0 (breaking: the auth path changed)
 - If you use the demo Worker, add `demo:read` to the scope list of each `ASSISTANT_TOKENS` entry. Without it every `/api/v1` route answers 403.
 - If you use `createStaticTokenAuth`, give each token its own `id`. A map that uses one `id` twice throws when it is built. The `id` is the principal id, and it owns the pending approvals. When you rotate a key, remove the old token. Do not keep both under one `id`.
 - A token now also signs in as the `session` cookie. A write made with the cookie needs its `Origin` in the `origins` option, or it is a 403. Add the origins of your web app before you ship.
+- If you use the React panel, load `agentic-design/tokens.css` as described in the `react.css` entry above. Without it the panel loses its colors.
 - Your own Worker needs no change for the route scopes. `routeScopes` is new in 0.5.0 and is optional. If you pass it to `createWorker`, give each caller the scope of every route group it calls.
 
 ## 0.4.0
