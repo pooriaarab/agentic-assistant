@@ -12,7 +12,7 @@ import { runAssistant, ToolRegistry, createPrincipal, AnthropicProvider } from "
 
 const principal = createPrincipal({ id: "agent-1", kind: "agent_of_human", parentId: "user-42", scopes: ["notes:read"] });
 for await (const event of runAssistant({ provider: new AnthropicProvider({ useDefaultEndpoint: true }), registry, principal, messages })) {
-  // run_start, text_delta, tool_call, tool_result, turn_end, done
+  // run_start, turn_start, text_delta, tool_call, approval_request, approval_decision, tool_result, turn_end, done
 }
 ```
 

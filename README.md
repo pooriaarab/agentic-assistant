@@ -7,12 +7,18 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: early. The core loop, the tool sources, approvals, and the React panel work. It is not on npm yet.
-> The chat CLI is not built yet.
+> Status: version 0.1.0, the first release. The core loop, the tool sources, approvals, and the React panel work.
+> The chat CLI and the MCP server are not built yet. The `agentic-assistant` command only prints help and version.
 
 ## Install
 
-The package is not on npm yet. Build it from source:
+```sh
+npm install agentic-assistant
+```
+
+You need Node.js 18 or newer. The React panel needs `react` 18 or newer.
+
+To build from source:
 
 ```sh
 git clone https://github.com/pooriaarab/agentic-assistant && cd agentic-assistant
@@ -131,6 +137,7 @@ The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, an
 
 ## Limits
 
+- The chat CLI and the MCP server are not built. The `agentic-assistant` command prints help and version only.
 - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
 - The panel shows plain text, not Markdown.
 - The gate trusts the name that `decidedBy` carries. Your gate must check who the person is. `QueueApprovalGate` does not.

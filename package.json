@@ -1,6 +1,6 @@
 {
   "name": "agentic-assistant",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "An AI assistant that acts inside your apps with the user's own permissions.",
   "keywords": [
     "assistant",
@@ -26,12 +26,13 @@
     "node": ">=18"
   },
   "files": [
-    "dist"
+    "dist",
+    "llms.txt",
+    "SKILL.md"
   ],
   "publishConfig": {
     "access": "public"
   },
-  "mcpName": "io.github.pooriaarab/agentic-assistant",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
