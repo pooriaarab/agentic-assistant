@@ -122,7 +122,7 @@ The panel colors are `agentic-design` tokens (`--agd-color-*`), so load `agentic
 
 The panel streams the answer, shows each tool call as a card, and shows an approval prompt with the exact arguments. Every message, card, and prompt that the assistant makes carries a visible "AI-generated" label. Tool output is shown as text and never as HTML. The panel does not hold a model, a key, or a gate. It needs `react` 18 or newer.
 
-The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.agd-assistant` or a parent. The sheet loads no font, image, or file from another host. A prompt that the run left open (after Stop or an error) is closed and marked expired. Closing the panel stops the run.
+The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.agd-assistant`. The sheet loads no font, image, or file from another host. A prompt that the run left open (after Stop or an error) is closed and marked expired. Closing the panel stops the run.
 
 ## Use the CLI
 
