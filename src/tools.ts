@@ -1,6 +1,7 @@
 import Ajv2020Module from "ajv/dist/2020.js";
 import type { AssistantPrincipal } from "./principal.js";
 import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
+import { canGenerateCode, compileFallback } from "./schema-fallback.js";
 import { parseScope, type Scope } from "./scopes.js";
 import type { JsonSchema, ToolSpec } from "./types.js";
 
@@ -29,6 +30,10 @@ export function defineTool<Input>(tool: ToolDefinition<Input>): ToolDefinition {
 
 // ajv is CommonJS. Under NodeNext the default import is the module, and `.default` is the class.
 const Ajv2020 = Ajv2020Module.default;
+
+// Workers and other hosts refuse `new Function`, which Ajv needs. They use a small checker that fails closed.
+// Checked at register time, not at load: Workers allow it while a module loads and refuse it inside a request.
+let codegen: boolean | undefined;
 
 const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const MAX_ERROR_CHARS = 200;
@@ -67,7 +72,7 @@ export class ToolRegistry {
     const { $schema: _draft, $id: _id, ...schema } = tool.inputSchema;
     let validate: ValidateWithErrors;
     try {
-      validate = this.ajv.compile(schema) as ValidateWithErrors;
+      validate = ((codegen ??= canGenerateCode()) ? this.ajv.compile(schema) : compileFallback(schema)) as ValidateWithErrors;
     } catch (error) {
       throw new Error(`tool "${tool.name}" has an invalid input schema: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -7,8 +7,9 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, and the MCP server work.
-> There is no hosted HTTP API yet.
+> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
+
+A demo Worker runs at https://agentic-assistant-demo.hello-fd1.workers.dev. `GET /` shows a demo page and `GET /health` answers 200. The `/api/v1` routes need a bearer key, so without one they answer 401. The demo has no model key set. A signed-in `POST /api/v1/chat` answers 503 with `not_configured`. The demo never fakes an answer.
 
 ## Install
 
@@ -173,7 +174,9 @@ export default {
 };
 ```
 
-Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401.
+To deploy the demo Worker yourself, set the secrets `ASSISTANT_TOKENS` (a JSON map of a bearer token of 32 bytes or more to `{"id":"ana","scopes":["demo:read"]}`) and `MODEL_KEY`, set the var `MODEL_URL` (or `MODEL_USE_DEFAULT_ENDPOINT=1` to call the US-hosted `api.anthropic.com`), then run `npm run deploy:demo`. Without `MODEL_KEY`, chat answers 503. `agentic-assistant/worker` also exports `createStaticTokenAuth`, an `agentic-identity` `Auth` that reads bearer tokens from a fixed map.
+
+Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401. Every chat response has the header `x-ai-generated: true`.
 
 | Route | What it does |
 |---|---|
@@ -232,7 +235,8 @@ The record says who made the content. It does not say the content is true.
 ## Limits
 
 - The hosted API keeps pending approvals in the memory of one Worker instance. A decision must reach the instance that holds the chat stream. Run it on one instance or behind sticky routing until a shared queue exists. It has no per-IP limit, only a cap of four chat turns at once per principal.
-- The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The sample Worker in `wrangler.jsonc` answers `/health` only.
+- The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The demo Worker was checked by hand under `wrangler dev` and on workers.dev.
+- Workers refuse code generation, so there a tool schema is checked by a small built-in checker, not by Ajv. It supports type, properties, required, additionalProperties, enum, const, items, length and size bounds, and anyOf, oneOf, allOf. It refuses a tool whose schema has any other keyword, such as `$ref`.
 - The CLI reads one message, or a short conversation on a terminal. It does not keep a conversation between runs.
 - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
 - The panel shows plain text, not Markdown.
