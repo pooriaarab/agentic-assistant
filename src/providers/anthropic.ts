@@ -18,11 +18,11 @@ export const PRICING_CHECKED_ON = "2026-10-29";
 
 // US dollars per million tokens, from the published model table. A test fails when the date
 // above is older than 120 days. Pass the `pricing` option to use other prices.
-export const KNOWN_PRICING: Record<string, Pricing> = {
-  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
-  "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20 },
-  "claude-haiku-5-5": { inputPerMTok: 0.1, outputPerMTok: 0.5 },
-};
+export const KNOWN_PRICING: Readonly<Record<string, Readonly<Pricing>>> = Object.freeze({
+  "claude-sonnet-5-5": Object.freeze({ inputPerMTok: 2, outputPerMTok: 10 }),
+  "claude-opus-5-5": Object.freeze({ inputPerMTok: 4, outputPerMTok: 20 }),
+  "claude-haiku-5-5": Object.freeze({ inputPerMTok: 0.1, outputPerMTok: 0.5 }),
+});
 
 export interface AnthropicProviderOptions {
   /** Read from ANTHROPIC_API_KEY when absent. */

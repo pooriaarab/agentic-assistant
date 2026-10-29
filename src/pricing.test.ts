@@ -7,7 +7,10 @@ const MAX_AGE_DAYS = 120;
 /** Days from the check date to `now`. Anything but a plain date gives NaN. */
 function ageInDays(checkedOn: string, now: number): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkedOn)) return Number.NaN;
-  return (now - Date.parse(`${checkedOn}T00:00:00Z`)) / DAY_MS;
+  const start = Date.parse(`${checkedOn}T00:00:00Z`);
+  // Date.parse rolls 2026-02-31 over to March, so the date must print back as it was written.
+  if (!Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== checkedOn) return Number.NaN;
+  return (now - start) / DAY_MS;
 }
 
 describe("price table", () => {
@@ -28,6 +31,13 @@ describe("price table", () => {
     expect(ageInDays("2026-06-01", now)).toBeGreaterThan(MAX_AGE_DAYS);
     expect(ageInDays("2026-07-01", now)).toBeLessThanOrEqual(MAX_AGE_DAYS);
     expect(Number.isNaN(ageInDays("last week", now))).toBe(true);
+    expect(Number.isNaN(ageInDays("2026-02-31", now))).toBe(true);
+    expect(Number.isNaN(ageInDays("2026-13-45", now))).toBe(true);
+  });
+
+  test("the table cannot be changed at run time", () => {
+    expect(Object.isFrozen(KNOWN_PRICING)).toBe(true);
+    for (const price of Object.values(KNOWN_PRICING)) expect(Object.isFrozen(price)).toBe(true);
   });
 
   test("every price is a finite number of 0 or more", () => {
