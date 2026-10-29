@@ -23,6 +23,7 @@ const TOOL = {
 } as const;
 
 const MAX_FIELD_CHARS = 200;
+const MAX_REASON_CHARS = 500;
 const NO_ARGS = { type: "object", properties: {}, additionalProperties: false } as const;
 const ID = { type: "string", minLength: 1, maxLength: MAX_FIELD_CHARS, description: "The id of the pending approval." } as const;
 
@@ -57,7 +58,7 @@ const REMOTE_TOOLS = [
     description: "Deny one pending call by id. A denial is final.",
     inputSchema: {
       type: "object",
-      properties: { id: ID, reason: { type: "string", maxLength: 500, description: "Why." } },
+      properties: { id: ID, reason: { type: "string", maxLength: MAX_REASON_CHARS, description: "Why." } },
       required: ["id"],
       additionalProperties: false,
     },
@@ -79,7 +80,7 @@ function remoteCommand(name: string, args: Record<string, unknown> | undefined):
   const text = (key: string, required: boolean): string | undefined | null => {
     const value = args?.[key];
     if (value === undefined && !required) return undefined;
-    return typeof value === "string" && value !== "" && value.length <= (key === "reason" ? 500 : MAX_FIELD_CHARS) ? value : null;
+    return typeof value === "string" && value !== "" && value.length <= (key === "reason" ? MAX_REASON_CHARS : MAX_FIELD_CHARS) ? value : null;
   };
   switch (name) {
     case "assistant_tools":
@@ -94,7 +95,7 @@ function remoteCommand(name: string, args: Record<string, unknown> | undefined):
     default: {
       const id = text("id", true);
       const reason = text("reason", false);
-      if (!id || reason === null) return "id must be a non-empty text, and reason a text of at most 500 characters";
+      if (!id || reason === null) return `id must be a non-empty text, and reason a text of at most ${MAX_REASON_CHARS} characters`;
       return { name: "deny", id, ...(reason !== undefined ? { reason } : {}) };
     }
   }

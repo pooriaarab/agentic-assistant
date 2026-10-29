@@ -2,7 +2,6 @@ import { AssistantApiError, createClient, type AssistantClient } from "./client.
 import { ConfigError } from "./chat.js";
 import { printable } from "./text.js";
 
-/** Where a running assistant API is, and which environment variable holds its bearer token. */
 export interface RemoteConfig {
   api: string;
   apiTokenEnv: string;

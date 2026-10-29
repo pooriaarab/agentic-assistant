@@ -24,7 +24,7 @@ An AI assistant that acts inside your apps with the user's own permissions.
 
 Usage:
   agentic-assistant chat [flags] [message]   Send a message. Read stdin when there is no message.
-  agentic-assistant mcp [flags]              Start an MCP server with the tool assistant_chat. With --api it adds four more.
+  agentic-assistant mcp [flags]              Start an MCP server with the tool assistant_chat. With --api it adds three more.
   agentic-assistant tools [flags]            List the tools of a running assistant API, with scope and risk.
   agentic-assistant approvals [flags]        List the calls that wait for a person.
   agentic-assistant approve <id> --digest <d> [flags]   Approve the exact call. Copy the digest from "approvals".
