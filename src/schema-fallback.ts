@@ -99,7 +99,14 @@ function check(schema: unknown, value: unknown, path: string, depth: number): Sc
   if (Array.isArray(value)) {
     if (typeof s.minItems === "number" && value.length < s.minItems) return fail(`must NOT have fewer than ${s.minItems} items`);
     if (typeof s.maxItems === "number" && value.length > s.maxItems) return fail(`must NOT have more than ${s.maxItems} items`);
-    if (s.uniqueItems === true && value.some((a, i) => value.some((b, j) => i !== j && same(a, b)))) return fail("must NOT have duplicate items");
+    if (s.uniqueItems === true) {
+      const seen = new Set<string>();
+      for (const item of value) {
+        const text = canonical(item);
+        if (seen.has(text)) return fail("must NOT have duplicate items");
+        seen.add(text);
+      }
+    }
     if (s.items !== undefined) {
       for (let i = 0; i < value.length; i++) {
         const error = check(s.items, value[i], `${path}/${i}`, depth + 1);
