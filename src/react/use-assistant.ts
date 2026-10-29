@@ -154,7 +154,7 @@ export function useAssistant(options: UseAssistantOptions) {
       if (!finished) {
         history.current = sent;
         // The stream ended with no stop reason (the host's connection may have dropped). Say so.
-        if (!failed) failed = true;
+        failed = true;
       }
       if (failed) add({ kind: "notice", id: nextId(), text: RUN_FAILED });
       // A prompt or a card that the run left open can never finish. Say so.

@@ -19,6 +19,7 @@ const TOOLS = [
   { name: "examples_prop", description: "A property named examples", inputSchema: object({ examples: { type: "array" } }, ["examples"]), annotations: { readOnlyHint: true } },
   { name: "stats", description: "Read the call counters", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "bad name!", description: "A name the assistant refuses", inputSchema: object({}) },
+  { name: "evil\u001b[2Jname", description: "A name with a terminal escape code", inputSchema: object({}) },
   { name: "bad_schema", description: "A schema that does not compile", inputSchema: { type: "object", properties: { a: { type: "nonsense" } } } },
 ];
 

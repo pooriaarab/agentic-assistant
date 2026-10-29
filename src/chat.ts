@@ -74,8 +74,10 @@ export function parseTarget(target: string, headerEnv: string[], env: ChatIo["en
     if (!isSecureUrl(target)) throw new ConfigError("--tools needs an https URL, or http on localhost only");
     const headers: Record<string, string> = {};
     for (const entry of headerEnv) {
-      const [name, variable] = entry.split("=", 2);
-      if (!name || !variable) throw new ConfigError(`--tools-header-env needs header=ENV_NAME, got "${entry}"`);
+      const at = entry.indexOf("=");
+      const name = at < 0 ? "" : entry.slice(0, at);
+      const variable = at < 0 ? "" : entry.slice(at + 1);
+      if (!name || !variable || variable.includes("=")) throw new ConfigError(`--tools-header-env needs header=ENV_NAME, got "${entry}"`);
       const value = env[variable];
       if (!value) throw new ConfigError(`environment variable ${variable} is not set`);
       headers[name] = value;

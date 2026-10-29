@@ -72,7 +72,7 @@ describe("MCP over stdio", () => {
     expect(mcp.tools.map((t) => t.name).sort()).toEqual([
       "n_big", "n_boom", "n_examples_prop", "n_img", "n_long_text", "n_notes_read", "n_notes_write", "n_pid", "n_slow", "n_stats", "n_structured",
     ]);
-    expect(mcp.skipped.map((s) => s.name).sort()).toEqual(["bad name!", "bad_schema", "huge_schema", "with_pattern"]);
+    expect(mcp.skipped.map((s) => s.name).sort()).toEqual(["bad name!", "bad_schema", "evil\u001b[2Jname", "huge_schema", "with_pattern"]);
     expect(mcp.skipped.find((s) => s.name === "bad name!")?.reason).toMatch(/invalid tool name/);
     expect(mcp.skipped.find((s) => s.name === "bad_schema")?.reason).toMatch(/invalid input schema/);
   });
@@ -303,7 +303,7 @@ describe("MCP over HTTP", () => {
   test("follows pages", async () => {
     const { url } = await serveNotes({ pageSize: 3 });
     const all = await connect({ ...SAFE, transport: { type: "http", url }, scope: readOnlyScope });
-    expect(all.tools.length + all.skipped.length).toBe(15);
+    expect(all.tools.length + all.skipped.length).toBe(16);
   });
 
   test("stops at the page limit when a server never ends the list", async () => {

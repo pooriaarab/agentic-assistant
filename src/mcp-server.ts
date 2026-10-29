@@ -46,7 +46,15 @@ export function createAssistantMcpServer(setup: Setup): Server {
   return server;
 }
 
+/** Serves on stdio. Resolves when the client closes its input, or the transport closes. */
 export async function startAssistantMcp(setup: Setup): Promise<void> {
   const server = createAssistantMcpServer(setup);
+  const ended = new Promise<void>((resolve) => {
+    server.onclose = resolve;
+    process.stdin.once("end", resolve);
+    process.stdin.once("close", resolve);
+  });
   await server.connect(new StdioServerTransport());
+  await ended;
+  await server.close().catch(() => undefined);
 }
