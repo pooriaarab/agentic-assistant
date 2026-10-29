@@ -10,6 +10,12 @@ import {
 // The same guess the loop uses to size a request.
 const CHARS_PER_TOKEN = 3;
 
+function checkUsage(usage: Usage): void {
+  for (const value of [usage.inputTokens, usage.outputTokens]) {
+    if (!Number.isInteger(value) || value < 0) throw new ProviderError("provider reported invalid token usage; caps cannot be enforced");
+  }
+}
+
 type Final = Extract<ModelEvent, { type: "message" }>;
 
 /**
@@ -29,7 +35,7 @@ export class FallbackProvider implements ModelProvider {
   readonly name: string;
   readonly model: string;
   readonly pricing?: Pricing;
-  readonly maxAsks = 2;
+  readonly maxAsks: number;
 
   constructor(
     private readonly primary: ModelProvider,
@@ -37,6 +43,8 @@ export class FallbackProvider implements ModelProvider {
   ) {
     this.name = primary.name;
     this.model = primary.model;
+    // A nested pair asks as often as its parts together.
+    this.maxAsks = (primary.maxAsks ?? 1) + (fallback.maxAsks ?? 1);
     // Without a price for both models, a cost cap cannot be enforced, and the loop refuses it.
     if (primary.pricing !== undefined && fallback.pricing !== undefined) {
       this.pricing = {
@@ -77,14 +85,17 @@ export class FallbackProvider implements ModelProvider {
       return;
     }
     // A stopped run must not start a second ask.
-    if (failure !== undefined && request.signal?.aborted) throw failure;
+    if (request.signal?.aborted) {
+      if (failure !== undefined) throw failure;
+      for (const event of held) yield event;
+      yield { ...(final as Final), answeredBy: answered(this.primary) };
+      return;
+    }
 
     let spent: Usage = { inputTokens: 0, outputTokens: 0 };
     if (final !== undefined) {
       // A bad count would widen the room below, so it stops the run now.
-      for (const value of [final.usage.inputTokens, final.usage.outputTokens]) {
-        if (!Number.isInteger(value) || value < 0) throw new ProviderError("provider reported invalid token usage; caps cannot be enforced");
-      }
+      checkUsage(final.usage);
       spent = final.usage;
     } else if (started) {
       const { system, messages, tools } = request;
@@ -106,6 +117,8 @@ export class FallbackProvider implements ModelProvider {
       else yield event;
     }
     if (second === undefined) throw new ProviderError(`provider "${this.fallback.name}" ended without a final message`);
+    // The sum below could hide a bad count, so the count is checked first.
+    checkUsage(second.usage);
     yield {
       ...second,
       usage: {

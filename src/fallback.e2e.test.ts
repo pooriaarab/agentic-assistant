@@ -19,7 +19,9 @@ import { serveNotes } from "../test-fixtures/notes-http.mjs";
 // 10. The fallback spends past a token or cost cap: its budget is not cut by what the first ask used.
 // 11. A first ask that failed after it streamed is not counted.
 // 12. An empty --fallback-model is accepted.
-// 13. A bad token count from the first ask (negative, not whole) widens the room of the second.
+// 13. A bad token count from the second ask is hidden by the sum, or a nested pair or a bad maxAsks widens the room.
+// 14. A refusal that comes after the run stopped still starts the second ask.
+// 15. A bad token count from the first ask (negative, not whole) widens the room of the second.
 
 const message = (text: string) => [{ role: "user" as const, content: [{ type: "text" as const, text }] }];
 
@@ -196,6 +198,53 @@ describe("FallbackProvider", () => {
     for await (const event of new FallbackProvider(dropped, new Named("small-1", [{ text: "ok", usage: { inputTokens: 1, outputTokens: 1 } }])).stream(request)) out.push(event);
     const final = out.at(-1) as Extract<ModelEvent, { type: "message" }>;
     expect(final.usage.inputTokens).toBeGreaterThanOrEqual(1000);
+  });
+
+  test("a bad token count from the fallback stops the run, as it does with one model", async () => {
+    const primary = new Named("big-1", [{ text: "no", stopReason: "refusal", usage: { inputTokens: 10, outputTokens: 100 } }]);
+    const fallback = new Named("small-1", [{ text: "ok", usage: { inputTokens: 10, outputTokens: -90 } }]);
+    expect(done(await run(new FallbackProvider(primary, fallback)))?.reason).toBe("provider_error");
+  });
+
+  test("a nested pair counts every ask, so the room is cut for three models", async () => {
+    const limited = { system: "s".repeat(300), limits: { maxTotalTokens: 1000 } };
+    // The room that the loop gives the first model, when the pair of models is wrapped as given.
+    const roomFor = async (wrap: (first: Named) => FallbackProvider | Named) => {
+      const first = new Named("a", [{ text: "ok" }]);
+      await run(wrap(first), limited);
+      return first.requests[0]?.maxOutputTokens as number;
+    };
+    const none = new Named("x", []);
+    const single = await roomFor((first) => first);
+    const pair = await roomFor((first) => new FallbackProvider(first, none));
+    const nested = await roomFor((first) => new FallbackProvider(new FallbackProvider(first, none), none));
+    expect(new FallbackProvider(new FallbackProvider(none, none), none).maxAsks).toBe(3);
+    expect(pair).toBeLessThan(single);
+    expect(nested).toBeLessThan(pair);
+  });
+
+  test("a bad maxAsks is refused before a model is asked", async () => {
+    for (const maxAsks of [0, -1, 1.5, Number.NaN]) {
+      const provider = Object.assign(new Named("a", [{ text: "x" }]), { maxAsks });
+      await expect(run(provider), String(maxAsks)).rejects.toThrow(/maxAsks/);
+      expect(provider.requests).toHaveLength(0);
+    }
+  });
+
+  test("a refusal that arrives after the run was stopped does not start the fallback", async () => {
+    const controller = new AbortController();
+    const primary: ModelProvider = {
+      name: "refuser",
+      model: "refuser-1",
+      async *stream() {
+        controller.abort();
+        yield { type: "message", content: [], stopReason: "refusal", usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    };
+    const fallback = new Named("small-1", [{ text: "late" }]);
+    const events = await run(new FallbackProvider(primary, fallback), { signal: controller.signal });
+    expect(fallback.requests).toHaveLength(0);
+    expect(done(events)?.reason).toBe("refusal");
   });
 
   test("one model without a price leaves the pair without a price", () => {

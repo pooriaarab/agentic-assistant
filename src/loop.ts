@@ -124,6 +124,8 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxToolCalls = positiveInteger("maxToolCallsPerTurn", limits.maxToolCallsPerTurn, DEFAULT_MAX_TOOL_CALLS_PER_TURN) as number;
   const approvalTimeoutMs = positiveInteger("approvalTimeoutMs", limits.approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS) as number;
   if (approvalTimeoutMs > MAX_TIMER_MS) throw new RangeError(`approvalTimeoutMs must be at most ${MAX_TIMER_MS}`);
+  const maxAsks = provider.maxAsks ?? 1;
+  if (!Number.isInteger(maxAsks) || maxAsks < 1) throw new RangeError(`provider "${provider.name}" has an invalid maxAsks; it must be a whole number of 1 or more`);
   const prices = provider.pricing;
   if (prices !== undefined) {
     for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
@@ -142,7 +144,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
     }
     maxCostUsd = limits.maxCostUsd;
   }
-  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls, approvalTimeoutMs };
+  return { maxAsks, maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls, approvalTimeoutMs };
 }
 
 async function principalActive(principal: AssistantPrincipal, now: number): Promise<boolean> {
@@ -244,7 +246,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
     }
     // The most output this request may use, and the cap that sets it.
     // A provider that may ask twice can use the input twice, so the pre-check counts it twice.
-    estimatedInput *= provider.maxAsks ?? 1;
+    estimatedInput *= limits.maxAsks;
     let room = limits.maxOutput;
     let limitedBy: DoneReason = "token_cap";
     if (limits.maxTotalTokens !== undefined) {
