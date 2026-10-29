@@ -57,7 +57,7 @@ export function createProvenance(input: ProvenanceInput): Provenance {
     if (typeof a?.id !== "string" || a.id === "") throw new TypeError("an approver needs a non-empty id");
     if (a.kind !== "unknown" && !APPROVER_KINDS.includes(a.kind)) throw new TypeError(`approver kind must be one of ${APPROVER_KINDS.join(", ")}, unknown`);
   }
-  const approvers = [...new Map((input.approvedBy ?? []).map((a) => [`${a.kind}:${a.id}`, { id: a.id, kind: a.kind }])).values()].sort((a, b) => (a.id + a.kind).localeCompare(b.id + b.kind));
+  const approvers = [...new Map((input.approvedBy ?? []).map((a) => [`${a.kind}:${a.id}`, { id: a.id, kind: a.kind }])).values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
   return {
     generator: "ai",
     model: input.model,

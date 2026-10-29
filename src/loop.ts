@@ -211,7 +211,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
   let answered: AnsweredBy | undefined;
   const clock = (): number => {
     const time = now();
-    return Number.isFinite(time) ? time : Date.now();
+    return Number.isFinite(new Date(time).getTime()) ? time : Date.now();
   };
   const stamp = (extra: { approvedBy?: Approver[]; tool?: string; risk?: Provenance["risk"] } = {}): Provenance | undefined =>
     answered === undefined

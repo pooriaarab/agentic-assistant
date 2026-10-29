@@ -118,7 +118,7 @@ describe("provenance helper", () => {
     expect(marker.digitalSourceType).toMatch(/trainedAlgorithmicMedia$/);
     expect(marker.dateCreated).toBe("2026-10-29T10:00:00.000Z");
     expect(marker.additionalProperty.filter((p: any) => p.name.startsWith("approvedBy")).map((p: any) => `${p.name}=${p.value}`)).toEqual(
-      ["approvedBy:human=bob", "approvedBy:host=cli:pre-approved", "approvedBy:agent=ops", "approvedBy:unknown=x"].sort((a, b) => a.split("=")[1]!.localeCompare(b.split("=")[1]!)),
+      ["approvedBy:human=bob", "approvedBy:host=cli:pre-approved", "approvedBy:agent=ops", "approvedBy:unknown=x"],
     );
   });
 
@@ -144,10 +144,10 @@ describe("provenance helper", () => {
     }
   });
 
-  test("a clock that is not a number gives a record the real time", async () => {
+  test.each([Number.NaN, 1e20])("a clock of %s gives a record the real time", async (clockValue) => {
     const principal = createPrincipal({ id: "a", kind: "agent_of_human", parentId: "ana", scopes: ["notes:read"] });
     const out: AssistantEvent[] = [];
-    for await (const event of runAssistant({ provider: new ScriptedProvider([{ text: "hi" }]), registry: tools(), principal, now: () => Number.NaN, messages: [] })) out.push(event);
+    for await (const event of runAssistant({ provider: new ScriptedProvider([{ text: "hi" }]), registry: tools(), principal, now: () => clockValue, messages: [] })) out.push(event);
     const last = done(out);
     // The record falls back to the real time, so the date is never wrong or missing.
     expect(last.reason).toBe("end_turn");
