@@ -5,35 +5,71 @@
 
 [Package](https://www.npmjs.com/package/agentic-assistant) · [Source](https://github.com/pooriaarab/agentic-assistant) · [Support](https://github.com/pooriaarab/agentic-assistant/issues)
 
-An AI assistant panel that acts inside your apps with the user's own permissions.
+An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: scaffold. This repository holds the starter code only. It is not on npm
-> yet, and none of the features below work yet.
+> Status: early. The core loop works. It is not on npm yet. Tool sources, approvals,
+> the React panel, and the chat CLI are not built yet.
 
-## Planned features
+## Install
 
-- An agent loop that calls app tools through their SDK or MCP server.
-- Acts as an agent of the signed-in person, with scopes that only narrow.
-- Asks for approval before risky or irreversible actions.
-- A model port: use Anthropic by default or an EU-hosted model instead.
-- A React side panel built on the shared design system.
-- Every action it takes is labeled as machine-made.
+```sh
+npm install agentic-assistant
+```
 
-## Surfaces
+## Quick start
 
-One package gives you each way in:
+```ts
+import { AnthropicProvider, ToolRegistry, createPrincipal, runAssistant } from "agentic-assistant";
 
-- **Library and SDK**: `import { ... } from "agentic-assistant"`.
-- **CLI**: `npx agentic-assistant --help`.
-- **MCP server**: `npx agentic-assistant mcp`, for Claude Code and other MCP clients.
-- **HTTP API**: a Cloudflare Worker you deploy to your own account.
-- **Web UI**: a small app served by the same Worker.
+const registry = new ToolRegistry().register({
+  name: "notes_read",
+  description: "Read one note by id",
+  inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+  scope: "notes:read",
+  handler: async ({ id }) => ({ text: `note ${id}` }),
+});
+
+// The host decides the scopes. The assistant never widens them.
+const principal = createPrincipal({
+  id: "agent-1",
+  kind: "agent_of_human",
+  parentId: "user-42",
+  scopes: ["notes:read"],
+});
+
+for await (const event of runAssistant({
+  provider: new AnthropicProvider(), // reads ANTHROPIC_API_KEY, model claude-sonnet-5-5
+  registry,
+  principal,
+  messages: [{ role: "user", content: [{ type: "text", text: "Read note 7." }] }],
+  limits: { maxTurns: 6, maxTotalTokens: 50_000 },
+})) {
+  if (event.type === "text_delta") process.stdout.write(event.text);
+}
+```
+
+## Features
+
+- **Model port.** `ModelProvider` has two adapters. `AnthropicProvider` calls the Anthropic API or a gateway. `OpenAICompatibleProvider` calls any server that speaks the chat-completions stream, so you can use an EU-hosted model. The OpenAI-compatible adapter needs an `https` URL, except for `localhost`.
+- **Scoped tools.** Each tool names the scope it needs, for example `notes:write`. Scopes use the same `<resource>:<action>` format as `agentic-identity`. The model sees only the tools inside the scopes. The loop refuses a call to any other tool.
+- **Fixed principal.** The assistant always acts as `agent_of_human`. `createPrincipal` throws when the kind is missing or different.
+- **Caps.** A max-turn cap, a total-token cap, and a cost cap. A cap that trips stops the run. No tool runs after that.
+- **Stops that fail closed.** An expired or revoked principal stops the run. So does a revocation check that throws. Truncated or refused model output never runs its tool calls.
+- **Machine-made labels.** Every tool call, result, and the end of each run carry an `actor` with `machineMade: true`.
+- **Test provider.** `agentic-assistant/testing` exports `ScriptedProvider`. It replays a fixed script for E2E tests.
+
+## Limits
+
+- No tool validation, MCP source, or approvals yet.
+- Token and cost caps need the provider to report usage. The OpenAI-compatible adapter throws when the server sends none.
+- A cost is an estimate from the `pricing` you give. Cache discounts are not applied.
+- A model refusal stops the run. No automatic fallback model is set up.
 
 ## Develop
 
 ```sh
 npm ci
-npm run build && npm run typecheck && npm test
+npm run ci:local
 ```
 
 ## License

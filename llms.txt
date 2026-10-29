@@ -1,15 +1,13 @@
 # agentic-assistant
 
-An AI assistant panel that acts inside your apps with the user's own permissions.
+An AI assistant that acts inside your apps with the user's own permissions.
 
 Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
 
-- SDK: import { summarizeText, dispatchText } from "agentic-assistant".
-- CLI: agentic-assistant summary --text "...".
-- MCP: run agentic-assistant mcp, then call summarize_text.
+- SDK: import { runAssistant, ToolRegistry, createPrincipal } from "agentic-assistant".
+- Test provider: import { ScriptedProvider } from "agentic-assistant/testing".
 
 ## Docs
 
 - README: https://github.com/pooriaarab/agentic-assistant
-- Core contract: https://github.com/pooriaarab/agentic-assistant/blob/main/docs/agentic-core.md
 - License: MIT

@@ -1,47 +1,26 @@
 export { VERSION } from "./version.js";
-export {
-  defineBrand,
-  createLogger,
-  GuardError,
-  VendorError,
-  createGuards,
-  LocalRouterAdapter,
-  HttpRouterAdapter,
-  recordCost,
-  getCostReport,
-  resetCosts,
-  createDryRunResult,
-  dispatchText,
-  summarizeText,
-} from "./core.js";
+export { runAssistant } from "./loop.js";
+export type { AssistantEvent, DeniedReason, DoneReason, RunLimits, RunOptions, RunTotals } from "./loop.js";
+export { createPrincipal, actorOf, PrincipalError } from "./principal.js";
+export type { Actor, AssistantPrincipal, PrincipalInput } from "./principal.js";
+export { ACTIONS, hasScope, parseScope, scopeCovers } from "./scopes.js";
+export type { Action, Scope } from "./scopes.js";
+export { ToolRegistry } from "./tools.js";
+export type { ToolContext, ToolDefinition } from "./tools.js";
+export { AnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from "./providers/anthropic.js";
+export type { AnthropicProviderOptions } from "./providers/anthropic.js";
+export { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
+export type { OpenAICompatibleOptions } from "./providers/openai-compatible.js";
+export { ProviderError } from "./types.js";
 export type {
-  BrandConfig,
-  LogLevel,
-  Logger,
-  LoggerOptions,
-  CapsConfig,
-  QuietHoursConfig,
-  GuardsConfig,
-  Guards,
-  DispatchReceipt,
-  RouterAdapter,
-  HttpRouterOptions,
-  CostEntry,
-  CostReport,
-  DispatchOptions,
-  DispatchResult,
-  TopWord,
-  TextSummary,
-  SummarizeOptions,
-} from "./core.js";
-
-import { defineBrand, type BrandConfig } from "./core.js";
-import { VERSION } from "./version.js";
-
-export const DEFAULT_BRAND: BrandConfig = defineBrand({
-  name: "Agentic pack",
-  command: "agentic-assistant",
-  description: "An AI assistant panel that acts inside your apps with the user's own permissions.",
-  keywords: ["assistant","ai","agent","tools","mcp","sdk","side-panel","approvals","eu","model-port"],
-  version: VERSION,
-});
+  ContentBlock,
+  JsonSchema,
+  Message,
+  ModelEvent,
+  ModelProvider,
+  ModelRequest,
+  Pricing,
+  StopReason,
+  ToolSpec,
+  Usage,
+} from "./types.js";

@@ -38,11 +38,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "bin": {
-    "agentic-assistant": "./dist/cli.js",
-    "agentic-assistant-mcp": "./dist/mcp-bin.js"
+    "agentic-assistant": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsup",
@@ -52,6 +55,7 @@
     "ci:local": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^3.25.0"
   },

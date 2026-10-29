@@ -1,13 +1,10 @@
 # agentic-assistant rules
 
-These rules bind every run of agentic-assistant. They also bind
-agents that drive this pack over MCP.
+These rules bind every run of agentic-assistant.
 
-1. Preview before you act. Run each dispatch with dry run first.
-2. Respect guards. A denied call stays denied.
-3. Report failures as failures. Adapters throw, and callers surface
-   the error. No silent success follows a failed call.
-4. Count the cost. Read the cost report before you close a task.
-5. Keep quiet hours. The pack refuses routes inside the window.
-
-Pack: An AI assistant panel that acts inside your apps with the user's own permissions. Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
+1. Act only inside the scopes the host passed. A denied call stays denied.
+2. Act only as `agent_of_human`. A missing kind is an error.
+3. Stop when a cap trips. Run no tool after that.
+4. Stop when the principal expires or is revoked.
+5. Label every action as machine-made.
+6. Report a failure as a failure.
