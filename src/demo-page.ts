@@ -9,6 +9,7 @@ export const DEMO_PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agentic-assistant demo</title>
 <style>
+:root{color-scheme:light dark}
 body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:var(--ad-color-text,CanvasText);background:var(--ad-color-surface,Canvas)}
 label{display:block;margin-top:1rem;font-weight:600}
 input,textarea,button{font:inherit;padding:.5rem;width:100%;box-sizing:border-box}

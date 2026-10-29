@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import worker from "./demo.js";
+import { DEMO_PAGE } from "./demo-page.js";
 import { createStaticTokenAuth } from "./static-auth.js";
 
 // Ways the demo Worker can fail.
@@ -8,6 +9,7 @@ import { createStaticTokenAuth } from "./static-auth.js";
 // 3. Chat with no model key answers with made-up output instead of "not_configured".
 // 4. An unsigned caller learns the model state, or a signed one gets a 500.
 // 5. The page loads from outside, or lacks the AI-generated label.
+// 6. A hard-coded hex color returns to the page style, or the page ignores the color scheme.
 
 const TOKEN = "t".repeat(40);
 const env = (extra: Record<string, string> = {}) => ({ ASSISTANT_TOKENS: JSON.stringify({ [TOKEN]: { id: "ana", scopes: ["demo:read"] } }), ...extra });
@@ -25,6 +27,11 @@ describe("demo worker", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
     expect(html).toContain("AI-generated");
     expect(html).not.toMatch(/https?:\/\//);
+  });
+  test("the page style has no hex colors and follows the color scheme", () => {
+    const style = DEMO_PAGE.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+    expect(style).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(style).toContain("color-scheme:light dark");
   });
   test("a call with no key, a wrong key, or no tokens is a 401", async () => {
     expect((await call("/api/v1/tools")).status).toBe(401);

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Changed
+
+- The demo page sets `color-scheme: light dark`, so its system-color fallbacks follow the user's dark mode.
+- A test fails if a hard-coded hex color returns to the demo page style.
+
 ## 0.5.1
 
 Changed
