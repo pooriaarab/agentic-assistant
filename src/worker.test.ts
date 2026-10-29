@@ -4,7 +4,7 @@ import { createStaticTokenAuth } from "./static-auth.js";
 
 // Ways the demo Worker can fail.
 // 1. A call with no key, a wrong key, or no tokens configured gets in.
-// 2. A short or malformed token map is accepted.
+// 2. A short or malformed token map is accepted, or a token entry with a kind signs in as a person.
 // 3. Chat with no model key answers with made-up output instead of "not_configured".
 // 4. An unsigned caller learns the model state, or a signed one gets a 500.
 // 5. The page loads from outside, or lacks the AI-generated label.
@@ -53,6 +53,8 @@ describe("demo worker", () => {
     expect((await call("/api/v1/tools", { headers: bearer }, { ASSISTANT_TOKENS: JSON.stringify({ short: { id: "a", scopes: [] } }) })).status).toBe(503);
     expect((await call("/api/v1/tools", { headers: bearer }, { ASSISTANT_TOKENS: "not json" })).status).toBe(503);
     await expect(createStaticTokenAuth({ [TOKEN]: { id: "", scopes: [] } })).rejects.toThrow();
+    // A kind in the entry would be dropped and the caller would sign in as a person.
+    await expect(createStaticTokenAuth({ [TOKEN]: { id: "bot", kind: "agent", scopes: [] } as never })).rejects.toThrow(/only an id and scopes/);
   });
   test("unknown routes return 404", async () => {
     expect((await call("/nowhere")).status).toBe(404);

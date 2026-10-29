@@ -1,0 +1,797 @@
+diff --git a/.gitignore b/.gitignore
+index 8c052de..dedd6b6 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,3 +5,4 @@ coverage/
+ .env
+ .env.local
+ .DS_Store
++.wrangler/
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 39b31bd..3c40f90 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,13 @@
+ 
+ ## Unreleased
+ 
++Added
++
++- A demo Worker entry (`dist/demo.js`, built from `src/demo.ts`), `wrangler.demo.jsonc`, and `npm run deploy:demo`. It serves a demo page, `/health`, and the `/api/v1` routes with bearer auth. With no model key, chat answers 503 `not_configured`.
++- `createStaticTokenAuth`, an `agentic-identity` `Auth` for a fixed map of bearer tokens.
++- Chat responses carry the header `x-ai-generated: true`.
++- A small schema checker for hosts that refuse code generation, such as Workers. It fails closed on keywords it does not support.
++
+ Changed
+ 
+ - The package needs Node.js 22 or newer. `agentic-identity` needs Node 22, so `engines.node` is now `>=22`. It was `>=18`.
+diff --git a/README.md b/README.md
+index 481d2c4..83ac017 100644
+--- a/README.md
++++ b/README.md
+@@ -7,8 +7,9 @@
+ 
+ An AI assistant that acts inside your apps with the user's own permissions.
+ 
+-> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, and the MCP server work.
+-> There is no hosted HTTP API yet.
++> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
++
++A demo Worker runs at https://agentic-assistant-demo.hello-fd1.workers.dev. `GET /` shows a demo page and `GET /health` answers 200. The `/api/v1` routes need a bearer key, so without one they answer 401. The demo has no model key set. A signed-in `POST /api/v1/chat` answers 503 with `not_configured`. The demo never fakes an answer.
+ 
+ ## Install
+ 
+@@ -173,7 +174,9 @@ export default {
+ };
+ ```
+ 
+-Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401.
++To deploy the demo Worker yourself, set the secrets `ASSISTANT_TOKENS` (a JSON map of a bearer token of 32 bytes or more to `{"id":"ana","scopes":["demo:read"]}`) and `MODEL_KEY`, set the var `MODEL_URL` (or `MODEL_USE_DEFAULT_ENDPOINT=1` to call the US-hosted `api.anthropic.com`), then run `npm run deploy:demo`. Without `MODEL_KEY`, chat answers 503. `agentic-assistant/worker` also exports `createStaticTokenAuth`, an `agentic-identity` `Auth` that reads bearer tokens from a fixed map.
++
++Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401. Every chat response has the header `x-ai-generated: true`.
+ 
+ | Route | What it does |
+ |---|---|
+@@ -232,7 +235,8 @@ The record says who made the content. It does not say the content is true.
+ ## Limits
+ 
+ - The hosted API keeps pending approvals in the memory of one Worker instance. A decision must reach the instance that holds the chat stream. Run it on one instance or behind sticky routing until a shared queue exists. It has no per-IP limit, only a cap of four chat turns at once per principal.
+-- The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The sample Worker in `wrangler.jsonc` answers `/health` only.
++- The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The demo Worker was checked by hand under `wrangler dev` and on workers.dev.
++- Workers refuse code generation, so there a tool schema is checked by a small built-in checker, not by Ajv. It supports type, properties, required, additionalProperties, enum, const, items, length and size bounds, and anyOf, oneOf, allOf. It refuses a tool whose schema has any other keyword, such as `$ref`.
+ - The CLI reads one message, or a short conversation on a terminal. It does not keep a conversation between runs.
+ - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
+ - The panel shows plain text, not Markdown.
+diff --git a/llms.txt b/llms.txt
+index 06d1ea5..33b6b4f 100644
+--- a/llms.txt
++++ b/llms.txt
+@@ -6,7 +6,7 @@ Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
+ 
+ - SDK: import { runAssistant, ToolRegistry, createPrincipal } from "agentic-assistant".
+ - CLI: agentic-assistant chat --tools <mcp-url> --scope <s> --tool-scope <s> "message". MCP server: agentic-assistant mcp.
+-- HTTP API: import { createWorker } from "agentic-assistant/worker". Routes under /api/v1: GET /tools, POST /chat (SSE), GET /approvals, POST /approvals/:id/approve|deny. Sign-in with agentic-identity principals.
++- HTTP API: import { createWorker } from "agentic-assistant/worker". Routes under /api/v1: GET /tools, POST /chat (SSE), GET /approvals, POST /approvals/:id/approve|deny. Sign-in with agentic-identity principals. Chat responses carry x-ai-generated: true. Demo: https://agentic-assistant-demo.hello-fd1.workers.dev (needs a bearer key; no model key set, so chat answers 503 not_configured).
+ - AI marking: events carry `provenance`; use provenanceLabel and provenanceMarker (JSON-LD, IPTC trainedAlgorithmicMedia). Also in HTTP, CLI --json and MCP results.
+ - Panel: import { AssistantPanel } from "agentic-assistant/react"; import "agentic-assistant/react.css".
+ - Test provider: import { ScriptedProvider } from "agentic-assistant/testing".
+diff --git a/package.json b/package.json
+index 1721832..82a18f9 100644
+--- a/package.json
++++ b/package.json
+@@ -63,6 +63,7 @@
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run",
+     "clean": "rm -rf dist",
++    "deploy:demo": "npm run build && wrangler deploy --config wrangler.demo.jsonc",
+     "prepack": "npm run build",
+     "ci:local": "npm run build && npm run typecheck && npm test"
+   },
+@@ -84,7 +85,8 @@
+     "react-dom": "^19.3.1",
+     "tsup": "^8.0.0",
+     "typescript": "^5.6.0",
+-    "vitest": "^3.0.0"
++    "vitest": "^3.0.0",
++    "wrangler": "^4.155.0"
+   },
+   "peerDependencies": {
+     "react": ">=18"
+diff --git a/src/api.e2e.test.ts b/src/api.e2e.test.ts
+index fe3661a..272a823 100644
+--- a/src/api.e2e.test.ts
++++ b/src/api.e2e.test.ts
+@@ -147,6 +147,7 @@ describe("chat", () => {
+     const response = await w.post("/chat", token, { message: "read n1" });
+     expect(response.status).toBe(200);
+     expect(response.headers.get("content-type")).toBe("text/event-stream");
++    expect(response.headers.get("x-ai-generated")).toBe("true");
+     const list = await events(response).all();
+     const names = list.map((e) => e.event);
+     expect(names[0]).toBe("run_start");
+diff --git a/src/api.ts b/src/api.ts
+index 15cffd1..601312c 100644
+--- a/src/api.ts
++++ b/src/api.ts
+@@ -217,7 +217,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
+       },
+     });
+     return new Response(body, {
+-      headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
++      headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no", "x-ai-generated": "true" },
+     });
+   }
+ 
+diff --git a/src/demo-page.ts b/src/demo-page.ts
+new file mode 100644
+index 0000000..c847728
+--- /dev/null
++++ b/src/demo-page.ts
+@@ -0,0 +1,72 @@
++/** The demo page. One file, no outside requests: styles and script are inline and the CSP blocks everything else. */
++export const DEMO_CSP =
++  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
++
++export const DEMO_PAGE = `<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>agentic-assistant demo</title>
++<style>
++body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#fff}
++label{display:block;margin-top:1rem;font-weight:600}
++input,textarea,button{font:inherit;padding:.5rem;width:100%;box-sizing:border-box}
++button{width:auto;min-height:2.5rem;margin-top:1rem;cursor:pointer}
++:focus-visible{outline:3px solid #0b57d0;outline-offset:2px}
++#out{white-space:pre-wrap;border:1px solid #767676;padding:1rem;margin-top:1rem;min-height:4rem}
++.badge{display:inline-block;border:1px solid #1a1a1a;padding:0 .5rem;font-size:.875rem}
++</style>
++</head>
++<body>
++<main>
++<h1>agentic-assistant demo</h1>
++<p>Send a message to the hosted API. You need a bearer key. The key stays in this page and goes only to this Worker.</p>
++<form id="f">
++<label for="key">Bearer key</label>
++<input id="key" type="password" autocomplete="off" required>
++<label for="msg">Message</label>
++<textarea id="msg" rows="3" required></textarea>
++<button type="submit">Send</button>
++</form>
++<h2>Answer <span class="badge">AI-generated</span></h2>
++<div id="out" role="log" aria-live="polite" aria-label="Assistant answer, AI-generated"></div>
++</main>
++<script>
++const out = document.getElementById("out");
++document.getElementById("f").addEventListener("submit", async (e) => {
++  e.preventDefault();
++  out.textContent = "";
++  const res = await fetch("/api/v1/chat", {
++    method: "POST",
++    headers: { authorization: "Bearer " + document.getElementById("key").value, "content-type": "application/json" },
++    body: JSON.stringify({ message: document.getElementById("msg").value }),
++  });
++  if (!res.ok || !res.body) {
++    const body = await res.json().catch(() => ({}));
++    out.textContent = "Error " + res.status + ": " + (body.message || body.error || "request failed");
++    return;
++  }
++  const reader = res.body.getReader();
++  const decoder = new TextDecoder();
++  let buffer = "";
++  for (;;) {
++    const { done, value } = await reader.read();
++    if (done) break;
++    buffer += decoder.decode(value, { stream: true });
++    let end;
++    while ((end = buffer.indexOf("\\n\\n")) >= 0) {
++      const block = buffer.slice(0, end);
++      buffer = buffer.slice(end + 2);
++      const data = block.split("\\n").find((l) => l.startsWith("data: "));
++      if (!data) continue;
++      let event;
++      try { event = JSON.parse(data.slice(6)); } catch { continue; }
++      if (event.type === "text_delta" && typeof event.text === "string") out.textContent += event.text;
++      if (event.type === "done" && event.reason !== "end_turn") out.textContent += "\\n[stopped: " + event.reason + "]";
++    }
++  }
++});
++</script>
++</body>
++</html>`;
+diff --git a/src/demo.ts b/src/demo.ts
+new file mode 100644
+index 0000000..76d333b
+--- /dev/null
++++ b/src/demo.ts
+@@ -0,0 +1,98 @@
++import type { AssistantApiOptions } from "./api.js";
++import { DEMO_CSP, DEMO_PAGE } from "./demo-page.js";
++import { AnthropicProvider } from "./providers/anthropic.js";
++import { createStaticTokenAuth, type StaticTokenEntry } from "./static-auth.js";
++import { ToolRegistry } from "./tools.js";
++import { VERSION } from "./version.js";
++import { createWorker } from "./worker.js";
++
++export interface DemoEnv {
++  PACK_NAME?: string;
++  /** Secret. A JSON map of bearer token (32 bytes or more) to `{ "id": "...", "scopes": ["demo:read"] }`. Unset means every call is a 401. */
++  ASSISTANT_TOKENS?: string;
++  /** Secret. The model API key. Unset means chat answers 503 "not_configured". */
++  MODEL_KEY?: string;
++  /** Base URL of the model endpoint, for example an EU-hosted gateway. */
++  MODEL_URL?: string;
++  /** Set to "1" to call api.anthropic.com, a US-hosted endpoint, when `MODEL_URL` is not set. */
++  MODEL_USE_DEFAULT_ENDPOINT?: string;
++  MODEL_NAME?: string;
++}
++
++const demoRegistry = (): ToolRegistry =>
++  new ToolRegistry().register({
++    name: "demo_time",
++    description: "Return the current UTC time as an ISO 8601 text.",
++    inputSchema: { type: "object", properties: {}, additionalProperties: false },
++    scope: "demo:read",
++    risk: "safe",
++    handler: () => ({ now: new Date().toISOString() }),
++  });
++
++const DEMO_SYSTEM = "You are a demo assistant. You may use the demo_time tool. Answer in short, plain text.";
++
++function modelOptions(env: DemoEnv): { apiKey: string; baseUrl?: string; useDefaultEndpoint?: boolean; model?: string } | undefined {
++  if (!env.MODEL_KEY) return undefined;
++  if (env.MODEL_URL) return { apiKey: env.MODEL_KEY, baseUrl: env.MODEL_URL, model: env.MODEL_NAME || undefined };
++  if (env.MODEL_USE_DEFAULT_ENDPOINT === "1") return { apiKey: env.MODEL_KEY, useDefaultEndpoint: true, model: env.MODEL_NAME || undefined };
++  return undefined;
++}
++
++const notConfigured = (message: string): Response =>
++  Response.json({ error: "not_configured", message }, { status: 503, headers: { "cache-control": "no-store" } });
++
++interface Demo {
++  worker: ReturnType<typeof createWorker>;
++  auth: AssistantApiOptions["auth"];
++}
++
++// One build per env object. The API keeps pending approvals in memory, so a new one per request would lose them.
++const demos = new WeakMap<object, Promise<Demo>>();
++
++async function buildDemo(env: DemoEnv): Promise<Demo> {
++  const tokens = env.ASSISTANT_TOKENS ? (JSON.parse(env.ASSISTANT_TOKENS) as Record<string, StaticTokenEntry>) : {};
++  const auth = await createStaticTokenAuth(tokens);
++  const worker = createWorker({
++    auth,
++    registry: demoRegistry(),
++    system: DEMO_SYSTEM,
++    limits: { maxTurns: 4, maxTotalTokens: 20_000, maxOutputTokensPerTurn: 1024 },
++    provider: () => {
++      const options = modelOptions(env);
++      if (options === undefined) throw new Error("no model");
++      return new AnthropicProvider(options);
++    },
++  });
++  return { worker, auth };
++}
++
++/**
++ * The demo Worker. It serves a demo page at `/`, `/health`, and the `/api/v1` routes with bearer auth.
++ * It never fakes output: with no tokens every call is a 401, and with no model key chat answers 503.
++ */
++export default {
++  async fetch(request: Request, env: DemoEnv): Promise<Response> {
++    const url = new URL(request.url);
++    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, pack: env.PACK_NAME ?? "agentic-assistant", version: VERSION });
++    if (request.method === "GET" && url.pathname === "/") {
++      return new Response(DEMO_PAGE, {
++        headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": DEMO_CSP, "cache-control": "no-store", "x-content-type-options": "nosniff" },
++      });
++    }
++    if (!url.pathname.startsWith("/api/v1/")) return Response.json({ error: "not found" }, { status: 404 });
++    let demo: Demo;
++    try {
++      let built = demos.get(env);
++      if (built === undefined) demos.set(env, (built = buildDemo(env)));
++      demo = await built;
++    } catch {
++      demos.delete(env);
++      return notConfigured("the demo tokens are not valid");
++    }
++    if (request.method === "POST" && url.pathname.replace(/\/$/, "") === "/api/v1/chat" && modelOptions(env) === undefined) {
++      // Sign-in comes first, so a caller with no key learns nothing from this answer.
++      if ((await demo.auth.authenticate(request.clone())) !== null) return notConfigured("this demo has no model key or model endpoint set");
++    }
++    return demo.worker.fetch(request, env);
++  },
++};
+diff --git a/src/schema-fallback.test.ts b/src/schema-fallback.test.ts
+new file mode 100644
+index 0000000..ec9c8a6
+--- /dev/null
++++ b/src/schema-fallback.test.ts
+@@ -0,0 +1,100 @@
++import Ajv2020Module from "ajv/dist/2020.js";
++import { describe, expect, test } from "vitest";
++import { compileFallback } from "./schema-fallback.js";
++
++// Ways the checker can fail. Each one is a case below, judged against Ajv on the same input.
++// 1. A wrong type, a missing required name, or an extra name passes.
++// 2. A bound, an enum, a const, or a list rule is ignored.
++// 3. A nested or branching (anyOf, oneOf, allOf) rule is skipped.
++// 4. A schema with a keyword the checker cannot enforce is accepted, so input passes unchecked.
++// 5. A name like "__proto__" counts as present, or a deep input crashes the host.
++
++const Ajv2020 = Ajv2020Module.default;
++const ajv = new Ajv2020({ strict: false, logger: false });
++
++const schema = {
++  type: "object",
++  properties: {
++    name: { type: "string", minLength: 1, maxLength: 5 },
++    n: { type: "integer", minimum: 0, exclusiveMaximum: 10 },
++    kind: { enum: ["a", "b"] },
++    tags: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 2, uniqueItems: true },
++    either: { anyOf: [{ type: "string" }, { type: "number" }] },
++    one: { oneOf: [{ type: "number", minimum: 5 }, { type: "number", maximum: 6 }] },
++    all: { allOf: [{ type: "number" }, { minimum: 1 }] },
++    fixed: { const: { x: 1 } },
++    nested: { type: "object", properties: { deep: { type: "boolean" } }, required: ["deep"], additionalProperties: false },
++    nothing: { type: ["string", "null"] },
++  },
++  required: ["name"],
++  additionalProperties: false,
++};
++
++const inputs: unknown[] = [
++  { name: "ok" },
++  {},
++  [],
++  null,
++  "text",
++  { name: 1 },
++  { name: "" },
++  { name: "toolong" },
++  { name: "ok", extra: 1 },
++  { name: "ok", n: 3 },
++  { name: "ok", n: 3.5 },
++  { name: "ok", n: -1 },
++  { name: "ok", n: 10 },
++  { name: "ok", kind: "a" },
++  { name: "ok", kind: "c" },
++  { name: "ok", tags: [] },
++  { name: "ok", tags: ["a", "b"] },
++  { name: "ok", tags: ["a", "b", "c"] },
++  { name: "ok", tags: ["a", "a"] },
++  { name: "ok", tags: [1] },
++  { name: "ok", either: "s" },
++  { name: "ok", either: true },
++  { name: "ok", one: 5.5 },
++  { name: "ok", one: 7 },
++  { name: "ok", one: 3 },
++  { name: "ok", all: 2 },
++  { name: "ok", all: 0 },
++  { name: "ok", fixed: { x: 1 } },
++  { name: "ok", fixed: { x: 2 } },
++  { name: "ok", nested: { deep: true } },
++  { name: "ok", nested: {} },
++  { name: "ok", nested: { deep: true, more: 1 } },
++  { name: "ok", nothing: null },
++  { name: "ok", nothing: 1 },
++  JSON.parse('{"name":"ok","__proto__":1}'),
++  JSON.parse('{"__proto__":{"name":"x"}}'),
++];
++
++describe("schema fallback", () => {
++  test("agrees with Ajv on every input", () => {
++    const fallback = compileFallback(schema);
++    const reference = ajv.compile(schema);
++    for (const input of inputs) expect([JSON.stringify(input), fallback(input)]).toEqual([JSON.stringify(input), reference(input)]);
++  });
++  test("names the first problem", () => {
++    const fallback = compileFallback(schema);
++    expect(fallback({ name: "ok", extra: 1 })).toBe(false);
++    expect(fallback.errors?.[0]).toMatchObject({ instancePath: "", params: { additionalProperty: "extra" } });
++    expect(fallback({ name: 1 })).toBe(false);
++    expect(fallback.errors?.[0]?.instancePath).toBe("/name");
++    expect(fallback({ name: "ok" })).toBe(true);
++    expect(fallback.errors).toBeNull();
++  });
++  test("refuses a keyword it cannot enforce", () => {
++    for (const bad of [{ type: "object", $ref: "#/x" }, { type: "object", patternProperties: {} }, { type: "object", dependentRequired: {} }, { type: "object", properties: { a: { not: {} } } }]) {
++      expect(() => compileFallback(bad)).toThrow(/not supported/);
++    }
++    expect(() => compileFallback({ type: "object", properties: { a: { type: "nope" } } })).toThrow();
++  });
++  test("a deep input is walked only as far as the schema goes", () => {
++    const recursive = { type: "object", properties: { a: { type: "object" } } };
++    const fallback = compileFallback(recursive);
++    let deep: unknown = {};
++    for (let i = 0; i < 200; i++) deep = { a: deep };
++    expect(fallback(deep)).toBe(true);
++  });
++});
+diff --git a/src/schema-fallback.ts b/src/schema-fallback.ts
+new file mode 100644
+index 0000000..274fa67
+--- /dev/null
++++ b/src/schema-fallback.ts
+@@ -0,0 +1,151 @@
++/**
++ * A small JSON Schema checker for hosts that forbid code generation, such as Cloudflare Workers.
++ * Ajv builds its validators with `new Function`, which those hosts refuse. This checker walks the schema instead.
++ * It fails closed: a schema that uses a keyword it does not know is refused, so no input passes unchecked.
++ */
++export interface SchemaError {
++  instancePath: string;
++  message?: string;
++  params: Record<string, unknown>;
++}
++export type FallbackValidate = ((input: unknown) => boolean) & { errors?: SchemaError[] | null };
++
++type Schema = Record<string, unknown>;
++
++const ANNOTATIONS = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly", "format"]);
++const KEYWORDS = new Set([
++  "type", "properties", "required", "additionalProperties", "enum", "const", "items", "minItems", "maxItems", "minLength", "maxLength",
++  "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "anyOf", "oneOf", "allOf", "uniqueItems",
++]);
++const MAX_DEPTH = 64;
++const TYPES = ["string", "number", "integer", "boolean", "null", "object", "array"];
++
++const isObject = (value: unknown): value is Schema => typeof value === "object" && value !== null && !Array.isArray(value);
++
++function typeOf(value: unknown): string {
++  if (value === null) return "null";
++  if (Array.isArray(value)) return "array";
++  return typeof value;
++}
++
++function isType(value: unknown, type: string): boolean {
++  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
++  if (type === "number") return typeof value === "number" && Number.isFinite(value);
++  return typeOf(value) === type;
++}
++
++const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
++
++/** Throws when the schema holds anything this checker cannot enforce. */
++function assertSupported(schema: unknown, depth = 0): void {
++  if (typeof schema === "boolean") return;
++  if (!isObject(schema)) throw new Error("a schema must be an object");
++  if (depth > MAX_DEPTH) throw new Error("the schema is nested too deeply");
++  for (const [key, value] of Object.entries(schema)) {
++    if (ANNOTATIONS.has(key)) continue;
++    if (!KEYWORDS.has(key)) throw new Error(`the keyword "${key}" is not supported without code generation`);
++    if (key === "type") {
++      const types = Array.isArray(value) ? value : [value];
++      if (types.some((t) => typeof t !== "string" || !TYPES.includes(t))) throw new Error("a bad type");
++    } else if (key === "properties") {
++      if (!isObject(value)) throw new Error("properties must be an object");
++      for (const child of Object.values(value)) assertSupported(child, depth + 1);
++    } else if (key === "items" || key === "additionalProperties") assertSupported(value, depth + 1);
++    else if (key === "anyOf" || key === "oneOf" || key === "allOf") {
++      if (!Array.isArray(value)) throw new Error(`${key} must be a list`);
++      for (const child of value) assertSupported(child, depth + 1);
++    } else if (key === "required") {
++      if (!Array.isArray(value) || value.some((name) => typeof name !== "string")) throw new Error("required must be a list of names");
++    } else if (key === "enum") {
++      if (!Array.isArray(value)) throw new Error("enum must be a list");
++    } else if (key === "uniqueItems") {
++      if (typeof value !== "boolean") throw new Error("uniqueItems must be true or false");
++    } else if (key !== "const" && typeof value !== "number") throw new Error(`${key} must be a number`);
++  }
++}
++
++function check(schema: unknown, value: unknown, path: string, depth: number): SchemaError | undefined {
++  if (depth > MAX_DEPTH) throw new Error("too deep");
++  if (schema === true) return undefined;
++  if (schema === false) return { instancePath: path, message: "must not be present", params: {} };
++  const s = schema as Schema;
++  const fail = (message: string, params: Record<string, unknown> = {}): SchemaError => ({ instancePath: path, message, params });
++
++  if (s.type !== undefined) {
++    const types = (Array.isArray(s.type) ? s.type : [s.type]) as string[];
++    if (!types.some((t) => isType(value, t))) return fail(`must be ${types.join(" or ")}`);
++  }
++  if ("const" in s && !same(s.const, value)) return fail("must be equal to constant");
++  if (Array.isArray(s.enum) && !s.enum.some((option) => same(option, value))) return fail("must be equal to one of the allowed values");
++  if (typeof value === "string") {
++    if (typeof s.minLength === "number" && [...value].length < s.minLength) return fail(`must NOT have fewer than ${s.minLength} characters`);
++    if (typeof s.maxLength === "number" && [...value].length > s.maxLength) return fail(`must NOT have more than ${s.maxLength} characters`);
++  }
++  if (typeof value === "number") {
++    if (typeof s.minimum === "number" && value < s.minimum) return fail(`must be >= ${s.minimum}`);
++    if (typeof s.maximum === "number" && value > s.maximum) return fail(`must be <= ${s.maximum}`);
++    if (typeof s.exclusiveMinimum === "number" && value <= s.exclusiveMinimum) return fail(`must be > ${s.exclusiveMinimum}`);
++    if (typeof s.exclusiveMaximum === "number" && value >= s.exclusiveMaximum) return fail(`must be < ${s.exclusiveMaximum}`);
++  }
++  if (Array.isArray(value)) {
++    if (typeof s.minItems === "number" && value.length < s.minItems) return fail(`must NOT have fewer than ${s.minItems} items`);
++    if (typeof s.maxItems === "number" && value.length > s.maxItems) return fail(`must NOT have more than ${s.maxItems} items`);
++    if (s.uniqueItems === true && value.some((a, i) => value.some((b, j) => i !== j && same(a, b)))) return fail("must NOT have duplicate items");
++    if (s.items !== undefined) {
++      for (let i = 0; i < value.length; i++) {
++        const error = check(s.items, value[i], `${path}/${i}`, depth + 1);
++        if (error) return error;
++      }
++    }
++  }
++  if (isObject(value)) {
++    for (const name of (s.required as string[] | undefined) ?? []) {
++      if (!Object.hasOwn(value, name)) return fail(`must have required property '${name}'`, { missingProperty: name });
++    }
++    const properties = isObject(s.properties) ? s.properties : {};
++    for (const [name, child] of Object.entries(value)) {
++      const key = `${path}/${name.replace(/~/g, "~0").replace(/\//g, "~1")}`;
++      if (Object.hasOwn(properties, name)) {
++        const error = check(properties[name], child, key, depth + 1);
++        if (error) return error;
++      } else if (s.additionalProperties === false) {
++        return fail("must NOT have additional properties", { additionalProperty: name });
++      } else if (s.additionalProperties !== undefined) {
++        const error = check(s.additionalProperties, child, key, depth + 1);
++        if (error) return error;
++      }
++    }
++  }
++  if (Array.isArray(s.allOf)) {
++    for (const child of s.allOf) {
++      const error = check(child, value, path, depth + 1);
++      if (error) return error;
++    }
++  }
++  if (Array.isArray(s.anyOf) && !s.anyOf.some((child) => check(child, value, path, depth + 1) === undefined)) return fail("must match a schema in anyOf");
++  if (Array.isArray(s.oneOf) && s.oneOf.filter((child) => check(child, value, path, depth + 1) === undefined).length !== 1) {
++    return fail("must match exactly one schema in oneOf");
++  }
++  return undefined;
++}
++
++/** Builds a validator from a schema. Throws when the schema is not supported. */
++export function compileFallback(schema: Schema): FallbackValidate {
++  assertSupported(schema);
++  const validate: FallbackValidate = (input) => {
++    const error = check(schema, input, "", 0);
++    validate.errors = error ? [error] : null;
++    return error === undefined;
++  };
++  return validate;
++}
++
++/** True when this host lets Ajv build validators. */
++export function canGenerateCode(): boolean {
++  try {
++    new Function("return 1")();
++    return true;
++  } catch {
++    return false;
++  }
++}
+diff --git a/src/static-auth.ts b/src/static-auth.ts
+new file mode 100644
+index 0000000..9a4405b
+--- /dev/null
++++ b/src/static-auth.ts
+@@ -0,0 +1,43 @@
++import type { Auth, PrincipalContext } from "agentic-identity";
++
++/** What one bearer token stands for. The caller is always a person: `kind: "human"`. */
++export interface StaticTokenEntry {
++  id: string;
++  scopes: string[];
++}
++
++const MIN_TOKEN_BYTES = 32;
++const encoder = new TextEncoder();
++
++async function digest(token: string): Promise<string> {
++  const hash = await crypto.subtle.digest("SHA-256", encoder.encode(token));
++  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
++}
++
++/**
++ * An `agentic-identity` Auth that reads `Authorization: Bearer <token>` against a fixed map.
++ * It keeps only SHA-256 digests. It throws on a token shorter than 32 bytes or an entry of the wrong shape.
++ * An empty map is allowed: every request is then a 401.
++ */
++export async function createStaticTokenAuth(tokens: Record<string, StaticTokenEntry>): Promise<Auth> {
++  const byDigest = new Map<string, PrincipalContext>();
++  for (const [token, entry] of Object.entries(tokens)) {
++    if (encoder.encode(token).length < MIN_TOKEN_BYTES) throw new Error(`tokens must hold at least ${MIN_TOKEN_BYTES} bytes`);
++    if (typeof entry?.id !== "string" || entry.id === "" || !Array.isArray(entry.scopes) || entry.scopes.some((s) => typeof s !== "string")) {
++      throw new Error("each token needs an id and a list of scopes");
++    }
++    byDigest.set(await digest(token), {
++      principalId: entry.id,
++      kind: "human",
++      chain: [{ id: entry.id, kind: "human" }],
++      scopes: [...entry.scopes],
++    });
++  }
++  return {
++    async authenticate(request) {
++      const match = /^Bearer ([^\s]+)$/.exec(request.headers.get("authorization") ?? "");
++      const context = match ? byDigest.get(await digest(match[1] as string)) : undefined;
++      return context ? { ...context, chain: context.chain.map((step) => ({ ...step })), scopes: [...context.scopes] } : null;
++    },
++  };
++}
+diff --git a/src/tools.ts b/src/tools.ts
+index 85fc892..8b3f9da 100644
+--- a/src/tools.ts
++++ b/src/tools.ts
+@@ -1,6 +1,7 @@
+ import Ajv2020Module from "ajv/dist/2020.js";
+ import type { AssistantPrincipal } from "./principal.js";
+ import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
++import { canGenerateCode, compileFallback } from "./schema-fallback.js";
+ import { parseScope, type Scope } from "./scopes.js";
+ import type { JsonSchema, ToolSpec } from "./types.js";
+ 
+@@ -30,6 +31,10 @@ export function defineTool<Input>(tool: ToolDefinition<Input>): ToolDefinition {
+ // ajv is CommonJS. Under NodeNext the default import is the module, and `.default` is the class.
+ const Ajv2020 = Ajv2020Module.default;
+ 
++// Workers and other hosts refuse `new Function`, which Ajv needs. They use a small checker that fails closed.
++// Checked at register time, not at load: Workers allow it while a module loads and refuse it inside a request.
++let codegen: boolean | undefined;
++
+ const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+ const MAX_ERROR_CHARS = 200;
+ 
+@@ -67,7 +72,7 @@ export class ToolRegistry {
+     const { $schema: _draft, $id: _id, ...schema } = tool.inputSchema;
+     let validate: ValidateWithErrors;
+     try {
+-      validate = this.ajv.compile(schema) as ValidateWithErrors;
++      validate = ((codegen ??= canGenerateCode()) ? this.ajv.compile(schema) : compileFallback(schema)) as ValidateWithErrors;
+     } catch (error) {
+       throw new Error(`tool "${tool.name}" has an invalid input schema: ${error instanceof Error ? error.message : String(error)}`);
+     }
+diff --git a/src/worker.test.ts b/src/worker.test.ts
+index f208b2e..40f69a6 100644
+--- a/src/worker.test.ts
++++ b/src/worker.test.ts
+@@ -1,17 +1,60 @@
+ import { describe, expect, test } from "vitest";
+-import worker from "./worker.js";
++import worker from "./demo.js";
++import { createStaticTokenAuth } from "./static-auth.js";
+ 
+-describe("worker", () => {
++// Ways the demo Worker can fail.
++// 1. A call with no key, a wrong key, or no tokens configured gets in.
++// 2. A short or malformed token map is accepted.
++// 3. Chat with no model key answers with made-up output instead of "not_configured".
++// 4. An unsigned caller learns the model state, or a signed one gets a 500.
++// 5. The page loads from outside, or lacks the AI-generated label.
++
++const TOKEN = "t".repeat(40);
++const env = (extra: Record<string, string> = {}) => ({ ASSISTANT_TOKENS: JSON.stringify({ [TOKEN]: { id: "ana", scopes: ["demo:read"] } }), ...extra });
++const call = (path: string, init: RequestInit = {}, e: object = env()) => worker.fetch(new Request(`https://demo.test${path}`, init), e);
++const bearer = { authorization: `Bearer ${TOKEN}` };
++
++describe("demo worker", () => {
+   test("GET /health reports ok", async () => {
+-    const response = await worker.fetch(new Request("https://pack.test/health"), { PACK_NAME: "probe" });
+-    expect(response.status).toBe(200);
++    const response = await call("/health", {}, { PACK_NAME: "probe" });
+     expect(await response.json()).toMatchObject({ ok: true, pack: "probe" });
+   });
+-  test("the sample Worker has no API and says so", async () => {
+-    const response = await worker.fetch(new Request("https://pack.test/api/v1/tools"), {});
++  test("the page is self-contained and labels the answer", async () => {
++    const response = await call("/");
++    const html = await response.text();
++    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
++    expect(html).toContain("AI-generated");
++    expect(html).not.toMatch(/https?:\/\//);
++  });
++  test("a call with no key, a wrong key, or no tokens is a 401", async () => {
++    expect((await call("/api/v1/tools")).status).toBe(401);
++    expect((await call("/api/v1/tools", { headers: { authorization: `Bearer ${"x".repeat(40)}` } })).status).toBe(401);
++    expect((await call("/api/v1/tools", { headers: bearer }, {})).status).toBe(401);
++  });
++  test("a good key lists the demo tool", async () => {
++    const response = await call("/api/v1/tools", { headers: bearer });
++    expect(response.status).toBe(200);
++    expect(await response.json()).toMatchObject({ tools: [{ name: "demo_time", risk: "safe" }] });
++  });
++  test("chat with no model key answers not_configured", async () => {
++    const response = await call("/api/v1/chat", { method: "POST", headers: bearer, body: JSON.stringify({ message: "hi" }) });
++    expect(response.status).toBe(503);
++    expect(await response.json()).toMatchObject({ error: "not_configured" });
++  });
++  test("a key with no endpoint is still not_configured", async () => {
++    const response = await call("/api/v1/chat", { method: "POST", headers: bearer, body: JSON.stringify({ message: "hi" }) }, env({ MODEL_KEY: "k" }));
+     expect(response.status).toBe(503);
+   });
++  test("chat with no sign-in is a 401, not a model hint", async () => {
++    const response = await call("/api/v1/chat", { method: "POST", body: JSON.stringify({ message: "hi" }) });
++    expect(response.status).toBe(401);
++  });
++  test("bad token maps stop the API", async () => {
++    expect((await call("/api/v1/tools", { headers: bearer }, { ASSISTANT_TOKENS: JSON.stringify({ short: { id: "a", scopes: [] } }) })).status).toBe(503);
++    expect((await call("/api/v1/tools", { headers: bearer }, { ASSISTANT_TOKENS: "not json" })).status).toBe(503);
++    await expect(createStaticTokenAuth({ [TOKEN]: { id: "", scopes: [] } })).rejects.toThrow();
++  });
+   test("unknown routes return 404", async () => {
+-    expect((await worker.fetch(new Request("https://pack.test/nowhere"), {})).status).toBe(404);
++    expect((await call("/nowhere")).status).toBe(404);
+   });
+ });
+diff --git a/src/worker.ts b/src/worker.ts
+index e475c4d..e8b1564 100644
+--- a/src/worker.ts
++++ b/src/worker.ts
+@@ -3,6 +3,8 @@ import { VERSION } from "./version.js";
+ 
+ export { APPROVER_SCOPE, createAssistantApi } from "./api.js";
+ export type { AssistantApiOptions } from "./api.js";
++export { createStaticTokenAuth } from "./static-auth.js";
++export type { StaticTokenEntry } from "./static-auth.js";
+ 
+ export interface WorkerEnv {
+   PACK_NAME?: string;
+@@ -22,15 +24,3 @@ export function createWorker(options: AssistantApiOptions): { fetch(request: Req
+     },
+   };
+ }
+-
+-/** The sample Worker has no auth, tools, or model, so it serves `/health` only. Use `createWorker` for the API. */
+-export default {
+-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+-    const url = new URL(request.url);
+-    if (request.method === "GET" && url.pathname === "/health") return health(env);
+-    if (url.pathname.startsWith("/api/v1/")) {
+-      return Response.json({ error: "the API is not set up: build the Worker with createWorker" }, { status: 503 });
+-    }
+-    return Response.json({ error: "not found" }, { status: 404 });
+-  },
+-};
+diff --git a/tsup.config.ts b/tsup.config.ts
+index 8432201..cd93658 100644
+--- a/tsup.config.ts
++++ b/tsup.config.ts
+@@ -11,6 +11,7 @@ export default defineConfig({
+     testing: "src/testing.ts",
+     cli: "src/cli.ts",
+     worker: "src/worker.ts",
++    demo: "src/demo.ts",
+     react: "src/react/index.ts",
+   },
+   format: ["esm"],
+diff --git a/wrangler.demo.jsonc b/wrangler.demo.jsonc
+new file mode 100644
+index 0000000..2782ca9
+--- /dev/null
++++ b/wrangler.demo.jsonc
+@@ -0,0 +1,12 @@
++{
++  // Live demo Worker. Deploy with: npm run deploy:demo (it builds first, so the version is set).
++  // Secrets (never in this file): ASSISTANT_TOKENS, MODEL_KEY. Optional var: MODEL_URL.
++  "name": "agentic-assistant-demo",
++  "main": "dist/demo.js",
++  "compatibility_date": "2026-01-01",
++  "compatibility_flags": ["nodejs_compat"],
++  "workers_dev": true,
++  "vars": {
++    "PACK_NAME": "agentic-assistant-demo"
++  }
++}
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index b5e51a2..39ba9e3 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -1,8 +1,8 @@
+ {
+-  // Sample worker config. Rename agentic-assistant on clone, then run
+-  // wrangler deploy from the pack root.
++  // Sample worker config for your own deploy. Set the secrets ASSISTANT_TOKENS and MODEL_KEY,
++  // and the var MODEL_URL, run npm run build, then wrangler deploy from the pack root.
+   "name": "agentic-assistant",
+-  "main": "src/worker.ts",
++  "main": "dist/demo.js",
+   "compatibility_date": "2026-01-01",
+   "compatibility_flags": ["nodejs_compat"],
+   "vars": {

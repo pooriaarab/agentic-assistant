@@ -37,11 +37,17 @@ const out = document.getElementById("out");
 document.getElementById("f").addEventListener("submit", async (e) => {
   e.preventDefault();
   out.textContent = "";
-  const res = await fetch("/api/v1/chat", {
-    method: "POST",
-    headers: { authorization: "Bearer " + document.getElementById("key").value, "content-type": "application/json" },
-    body: JSON.stringify({ message: document.getElementById("msg").value }),
-  });
+  let res;
+  try {
+    res = await fetch("/api/v1/chat", {
+      method: "POST",
+      headers: { authorization: "Bearer " + document.getElementById("key").value, "content-type": "application/json" },
+      body: JSON.stringify({ message: document.getElementById("msg").value }),
+    });
+  } catch {
+    out.textContent = "The request failed. Check the network and try again.";
+    return;
+  }
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => ({}));
     out.textContent = "Error " + res.status + ": " + (body.message || body.error || "request failed");
@@ -50,22 +56,29 @@ document.getElementById("f").addEventListener("submit", async (e) => {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let end;
-    while ((end = buffer.indexOf("\\n\\n")) >= 0) {
-      const block = buffer.slice(0, end);
-      buffer = buffer.slice(end + 2);
-      const data = block.split("\\n").find((l) => l.startsWith("data: "));
-      if (!data) continue;
-      let event;
-      try { event = JSON.parse(data.slice(6)); } catch { continue; }
-      if (event.type === "text_delta" && typeof event.text === "string") out.textContent += event.text;
-      if (event.type === "done" && event.reason !== "end_turn") out.textContent += "\\n[stopped: " + event.reason + "]";
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf("\\n\\n")) >= 0) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        const data = block.split("\\n").find((l) => l.startsWith("data: "));
+        if (!data) continue;
+        let event;
+        try { event = JSON.parse(data.slice(6)); } catch { continue; }
+        if (event.type === "text_delta" && typeof event.text === "string") out.textContent += event.text;
+        if (event.type === "error") { finished = true; out.textContent += "\\n[stopped: " + event.error + "]"; }
+        if (event.type === "done") { finished = true; if (event.reason !== "end_turn") out.textContent += "\\n[stopped: " + event.reason + (event.error ? ", " + event.error : "") + "]"; }
+      }
     }
+  } catch {
+    // The stream broke. The check below reports it.
   }
+  if (!finished) out.textContent += "\\n[stopped: the connection closed before the answer was complete]";
 });
 </script>
 </body>

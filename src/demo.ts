@@ -87,7 +87,7 @@ export default {
       demo = await built;
     } catch {
       demos.delete(env);
-      return notConfigured("the demo tokens are not valid");
+      return notConfigured("this demo is not set up");
     }
     if (request.method === "POST" && url.pathname.replace(/\/$/, "") === "/api/v1/chat" && modelOptions(env) === undefined) {
       // Sign-in comes first, so a caller with no key learns nothing from this answer.

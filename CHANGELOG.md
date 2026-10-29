@@ -9,6 +9,10 @@ Added
 - Chat responses carry the header `x-ai-generated: true`.
 - A small schema checker for hosts that refuse code generation, such as Workers. It fails closed on keywords it does not support.
 
+Removed
+
+- The default export of `agentic-assistant/worker` (a stub that answered `/health` only). Use `createWorker`.
+
 Changed
 
 - The package needs Node.js 22 or newer. `agentic-identity` needs Node 22, so `engines.node` is now `>=22`. It was `>=18`.

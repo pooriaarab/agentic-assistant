@@ -1,9 +1,10 @@
 {
   // Sample worker config for your own deploy. Set the secrets ASSISTANT_TOKENS and MODEL_KEY,
-  // and the var MODEL_URL, run npm run build, then wrangler deploy from the pack root.
+  // and the var MODEL_URL (or MODEL_USE_DEFAULT_ENDPOINT=1), run npm run build, then wrangler deploy from the pack root.
   "name": "agentic-assistant",
   "main": "dist/demo.js",
   "compatibility_date": "2026-01-01",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "PACK_NAME": "agentic-assistant"

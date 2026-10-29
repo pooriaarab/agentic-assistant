@@ -34,7 +34,16 @@ function isType(value: unknown, type: string): boolean {
   return typeOf(value) === type;
 }
 
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** JSON text with sorted keys, so two equal objects give one text whatever the order of their keys. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const same = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b);
 
 /** Throws when the schema holds anything this checker cannot enforce. */
 function assertSupported(schema: unknown, depth = 0): void {

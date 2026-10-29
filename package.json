@@ -63,7 +63,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
-    "deploy:demo": "npm run build && wrangler deploy --config wrangler.demo.jsonc",
+    "deploy:demo": "npm run build && WRANGLER_SEND_METRICS=false wrangler deploy --config wrangler.demo.jsonc",
     "prepack": "npm run build",
     "ci:local": "npm run build && npm run typecheck && npm test"
   },

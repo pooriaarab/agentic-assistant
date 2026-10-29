@@ -1,11 +1,12 @@
 {
   // Live demo Worker. Deploy with: npm run deploy:demo (it builds first, so the version is set).
-  // Secrets (never in this file): ASSISTANT_TOKENS, MODEL_KEY. Optional var: MODEL_URL.
+  // Secrets (never in this file): ASSISTANT_TOKENS, MODEL_KEY. Vars: MODEL_URL (or MODEL_USE_DEFAULT_ENDPOINT=1). One of them is required, or chat answers 503.
   "name": "agentic-assistant-demo",
   "main": "dist/demo.js",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "send_metrics": false,
   "vars": {
     "PACK_NAME": "agentic-assistant-demo"
   }

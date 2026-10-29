@@ -23,6 +23,10 @@ export async function createStaticTokenAuth(tokens: Record<string, StaticTokenEn
   const byDigest = new Map<string, PrincipalContext>();
   for (const [token, entry] of Object.entries(tokens)) {
     if (encoder.encode(token).length < MIN_TOKEN_BYTES) throw new Error(`tokens must hold at least ${MIN_TOKEN_BYTES} bytes`);
+    // A field such as `kind` would be dropped, and the caller would sign in as a person. Refuse it.
+    if (typeof entry !== "object" || entry === null || Object.keys(entry).some((key) => key !== "id" && key !== "scopes")) {
+      throw new Error("a token entry has only an id and scopes: every caller is a person");
+    }
     if (typeof entry?.id !== "string" || entry.id === "" || !Array.isArray(entry.scopes) || entry.scopes.some((s) => typeof s !== "string")) {
       throw new Error("each token needs an id and a list of scopes");
     }
