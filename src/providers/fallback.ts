@@ -81,14 +81,14 @@ export class FallbackProvider implements ModelProvider {
     });
     if (failure === undefined && final !== undefined && final.stopReason !== "refusal") {
       for (const event of held) yield event;
-      yield { ...final, answeredBy: answered(this.primary) };
+      yield { ...final, answeredBy: final.answeredBy ?? answered(this.primary) };
       return;
     }
     // A stopped run must not start a second ask.
     if (request.signal?.aborted) {
-      if (failure !== undefined) throw failure;
+      if (failure !== undefined || final === undefined) throw failure;
       for (const event of held) yield event;
-      yield { ...(final as Final), answeredBy: answered(this.primary) };
+      yield { ...final, answeredBy: final.answeredBy ?? answered(this.primary) };
       return;
     }
 
@@ -106,7 +106,7 @@ export class FallbackProvider implements ModelProvider {
       // The first ask used the whole room. A second ask would pass the cap.
       if (final !== undefined) {
         for (const event of held) yield event;
-        yield { ...final, answeredBy: answered(this.primary) };
+        yield { ...final, answeredBy: final.answeredBy ?? answered(this.primary) };
         return;
       }
       throw failure;
@@ -125,7 +125,8 @@ export class FallbackProvider implements ModelProvider {
         inputTokens: spent.inputTokens + second.usage.inputTokens,
         outputTokens: spent.outputTokens + second.usage.outputTokens,
       },
-      answeredBy: answered(this.fallback, failure === undefined ? "refusal" : "error"),
+      // A pair inside this one has already named the model that answered. Keep that name.
+      answeredBy: { ...(second.answeredBy ?? answered(this.fallback)), fallback: true, fallbackFor: failure === undefined ? "refusal" : "error" },
     };
   }
 }

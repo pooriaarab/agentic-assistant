@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import { FallbackProvider, OpenAICompatibleProvider, ToolRegistry, createPrincipal, runAssistant, type AssistantEvent, type ModelEvent, type ModelProvider, type ModelRequest } from "./index.js";
 import { runCli, type CliIo } from "./cli.js";
-import { ScriptedProvider } from "./testing.js";
+import { ScriptedProvider, type ScriptedTurn } from "./testing.js";
 import { serveNotes } from "../test-fixtures/notes-http.mjs";
 
 // Ways the fallback can fail. Each one is a case below.
@@ -21,7 +21,8 @@ import { serveNotes } from "../test-fixtures/notes-http.mjs";
 // 12. An empty --fallback-model is accepted.
 // 13. A bad token count from the second ask is hidden by the sum, or a nested pair or a bad maxAsks widens the room.
 // 14. A refusal that comes after the run stopped still starts the second ask.
-// 15. A bad token count from the first ask (negative, not whole) widens the room of the second.
+// 15. A nested pair names the model that refused instead of the one that answered.
+// 16. A bad token count from the first ask (negative, not whole) widens the room of the second.
 
 const message = (text: string) => [{ role: "user" as const, content: [{ type: "text" as const, text }] }];
 
@@ -221,6 +222,21 @@ describe("FallbackProvider", () => {
     expect(new FallbackProvider(new FallbackProvider(none, none), none).maxAsks).toBe(3);
     expect(pair).toBeLessThan(single);
     expect(nested).toBeLessThan(pair);
+  });
+
+  test("a nested pair names the model that really answered", async () => {
+    const refuse = { text: "no", stopReason: "refusal" as const };
+    const who = async (a: ScriptedTurn, b: ScriptedTurn, c: ScriptedTurn, wrap: "first" | "second") => {
+      const [pa, pb, pc] = [new Named("a", [a]), new Named("b", [b]), new Named("c", [c])];
+      const provider = wrap === "first" ? new FallbackProvider(new FallbackProvider(pa, pb), pc) : new FallbackProvider(pa, new FallbackProvider(pb, pc));
+      return turn(await run(provider))?.answeredBy;
+    };
+    const ok = { text: "ok" };
+    expect(await who(ok, ok, ok, "first")).toEqual({ provider: "scripted", model: "a", fallback: false });
+    expect(await who(refuse, ok, ok, "first")).toEqual({ provider: "scripted", model: "b", fallback: true, fallbackFor: "refusal" });
+    expect(await who(refuse, refuse, ok, "first")).toEqual({ provider: "scripted", model: "c", fallback: true, fallbackFor: "refusal" });
+    expect(await who(refuse, refuse, ok, "second")).toEqual({ provider: "scripted", model: "c", fallback: true, fallbackFor: "refusal" });
+    expect(await who(refuse, ok, ok, "second")).toEqual({ provider: "scripted", model: "b", fallback: true, fallbackFor: "refusal" });
   });
 
   test("a bad maxAsks is refused before a model is asked", async () => {
