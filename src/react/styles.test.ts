@@ -12,7 +12,7 @@ import { describe, expect, test } from "vitest";
 
 const css = readFileSync(new URL("./panel.css", import.meta.url), "utf8");
 const tokenCss = readFileSync(createRequire(import.meta.url).resolve("agentic-design/tokens.css"), "utf8");
-const declared = [...css.matchAll(/--aa-([a-z-]+):\s*var\(--ad-color-([a-z-]+), ([A-Za-z]+)\);/g)];
+const declared = [...css.matchAll(/--aa-([a-z-]+):\s*var\(--agd-color-([a-z-]+), ([A-Za-z]+)\);/g)];
 const mapping = Object.fromEntries(declared.map((m) => [m[1] as string, m[2] as string]));
 const fallback = Object.fromEntries(declared.map((m) => [m[1] as string, m[3] as string]));
 
@@ -21,7 +21,7 @@ function theme(selector: string): Record<string, string> {
   const start = tokenCss.indexOf(selector);
   if (start < 0) throw new Error(`tokens.css has no block for ${selector}`);
   const body = tokenCss.slice(tokenCss.indexOf("{", start) + 1, tokenCss.indexOf("}", start));
-  return Object.fromEntries([...body.matchAll(/--ad-color-([a-z-]+):\s*(#[0-9a-fA-F]{6});/g)].map((m) => [m[1] as string, m[2] as string]));
+  return Object.fromEntries([...body.matchAll(/--agd-color-([a-z-]+):\s*(#[0-9a-fA-F]{6});/g)].map((m) => [m[1] as string, m[2] as string]));
 }
 const themes = { light: theme('[data-theme="light"]'), dark: theme('[data-theme="dark"]'), os_dark: theme(":root:not([data-theme])") };
 const variablesFor = (name: keyof typeof themes) => Object.fromEntries(Object.entries(mapping).map(([key, token]) => [key, themes[name][token] as string]));
