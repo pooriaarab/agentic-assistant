@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { digestCall, TOOL_RISKS, type ApprovalDecision, type ApprovalGate, type ApprovalRequest, type ToolRisk } from "./approvals.js";
 import { runAssistant, type AssistantEvent, type RunLimits } from "./loop.js";
 import { PrincipalError, createPrincipal } from "./principal.js";
+import { FallbackProvider } from "./providers/fallback.js";
 import { AnthropicProvider } from "./providers/anthropic.js";
 import { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 import { connectMcpTools, type McpTransportConfig } from "./sources/mcp.js";
@@ -27,6 +28,8 @@ export interface ChatConfig {
   toolRisk: ToolRisk;
   provider: "anthropic" | "openai-compatible" | "scripted";
   model?: string;
+  /** A second model on the same provider. It answers once when the first one refuses or fails. */
+  fallbackModel?: string;
   baseUrl?: string;
   useDefaultEndpoint: boolean;
   apiKeyEnv?: string;
@@ -103,21 +106,21 @@ export function parseTarget(target: string, headerEnv: string[], env: ChatIo["en
   return { type: "stdio", command, args };
 }
 
-function buildProvider(config: ChatConfig, io: ChatIo): ModelProvider {
+function buildProvider(config: ChatConfig, io: ChatIo, model = config.model): ModelProvider {
   const key = config.apiKeyEnv === undefined ? undefined : io.env[config.apiKeyEnv];
   if (config.apiKeyEnv !== undefined && !key) throw new ConfigError(`environment variable ${config.apiKeyEnv} is not set`);
   switch (config.provider) {
     case "anthropic":
       return new AnthropicProvider({
-        model: config.model,
+        model,
         baseUrl: config.baseUrl,
         useDefaultEndpoint: config.useDefaultEndpoint,
         pricing: config.pricing,
         apiKey: key ?? io.env.ANTHROPIC_API_KEY,
       });
     case "openai-compatible":
-      if (!config.baseUrl || !config.model) throw new ConfigError("--provider openai-compatible needs --base-url and --model");
-      return new OpenAICompatibleProvider({ baseUrl: config.baseUrl, model: config.model, apiKey: key, pricing: config.pricing });
+      if (!config.baseUrl || !model) throw new ConfigError("--provider openai-compatible needs --base-url and --model");
+      return new OpenAICompatibleProvider({ baseUrl: config.baseUrl, model, apiKey: key, pricing: config.pricing });
     case "scripted": {
       if (!config.script) throw new ConfigError("--provider scripted needs --script <file>");
       let script: unknown;
@@ -179,6 +182,10 @@ export async function buildSetup(config: ChatConfig, io: ChatIo): Promise<Setup>
   try {
     createPrincipal({ ...principalOptions, kind: "agent_of_human" });
     provider = buildProvider(config, io);
+    if (config.fallbackModel !== undefined) {
+      if (config.provider === "scripted") throw new ConfigError("--fallback-model does not work with --provider scripted");
+      provider = new FallbackProvider(provider, buildProvider(config, io, config.fallbackModel));
+    }
   } catch (error) {
     if (error instanceof PrincipalError || error instanceof ProviderError) throw new ConfigError(error.message);
     throw error;

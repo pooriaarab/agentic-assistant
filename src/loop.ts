@@ -16,6 +16,7 @@ import {
   type ContentBlock,
   type Message,
   type ModelProvider,
+  type AnsweredBy,
   type StopReason,
   type Usage,
 } from "./types.js";
@@ -90,7 +91,7 @@ export type AssistantEvent =
       detail?: string;
       actor: Actor;
     }
-  | { type: "turn_end"; turn: number; usage: Usage; totals: RunTotals }
+  | { type: "turn_end"; turn: number; usage: Usage; totals: RunTotals; /** The model that answered this turn. */ answeredBy: AnsweredBy }
   | { type: "done"; reason: DoneReason; totals: RunTotals; actor: Actor; messages: Message[]; error?: string };
 
 const DEFAULT_MAX_TURNS = 8;
@@ -123,6 +124,8 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxToolCalls = positiveInteger("maxToolCallsPerTurn", limits.maxToolCallsPerTurn, DEFAULT_MAX_TOOL_CALLS_PER_TURN) as number;
   const approvalTimeoutMs = positiveInteger("approvalTimeoutMs", limits.approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS) as number;
   if (approvalTimeoutMs > MAX_TIMER_MS) throw new RangeError(`approvalTimeoutMs must be at most ${MAX_TIMER_MS}`);
+  const maxAsks = provider.maxAsks ?? 1;
+  if (!Number.isInteger(maxAsks) || maxAsks < 1) throw new RangeError(`provider "${provider.name}" has an invalid maxAsks; it must be a whole number of 1 or more`);
   const prices = provider.pricing;
   if (prices !== undefined) {
     for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
@@ -141,7 +144,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
     }
     maxCostUsd = limits.maxCostUsd;
   }
-  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls, approvalTimeoutMs };
+  return { maxAsks, maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars, maxToolCallsPerTurn: maxToolCalls, approvalTimeoutMs };
 }
 
 async function principalActive(principal: AssistantPrincipal, now: number): Promise<boolean> {
@@ -242,6 +245,8 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       return;
     }
     // The most output this request may use, and the cap that sets it.
+    // A provider that may ask twice can use the input twice, so the pre-check counts it twice.
+    estimatedInput *= limits.maxAsks;
     let room = limits.maxOutput;
     let limitedBy: DoneReason = "token_cap";
     if (limits.maxTotalTokens !== undefined) {
@@ -261,7 +266,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       yield finish(limitedBy);
       return;
     }
-    let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage } | undefined;
+    let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage; answeredBy?: AnsweredBy } | undefined;
     try {
       for await (const event of provider.stream({
         system,
@@ -291,7 +296,13 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         1_000_000;
     }
     messages.push({ role: "assistant", content: final.content });
-    yield { type: "turn_end", turn, usage: final.usage, totals: { ...totals } };
+    yield {
+      type: "turn_end",
+      turn,
+      usage: final.usage,
+      totals: { ...totals },
+      answeredBy: final.answeredBy ?? { provider: provider.name, model: provider.model, fallback: false },
+    };
 
     if (final.stopReason !== "tool_use") {
       yield finish(DONE_FOR_STOP[final.stopReason] ?? "provider_stop");

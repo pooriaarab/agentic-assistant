@@ -15,8 +15,10 @@ export { AnthropicProvider, DEFAULT_ANTHROPIC_MODEL, PRICING_CHECKED_ON } from "
 export type { AnthropicProviderOptions } from "./providers/anthropic.js";
 export { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 export type { OpenAICompatibleOptions } from "./providers/openai-compatible.js";
+export { FallbackProvider } from "./providers/fallback.js";
 export { ProviderError } from "./types.js";
 export type {
+  AnsweredBy,
   ContentBlock,
   JsonSchema,
   Message,

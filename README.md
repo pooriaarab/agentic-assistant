@@ -214,7 +214,7 @@ The assistant holds the caller's scopes and no more. A chat turn waits at a risk
 - A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices were checked on 2026-10-29 (`PRICING_CHECKED_ON`). A test fails when that date is over 120 days old. Haiku has no built-in price, because its rate changes with the prompt size. Pass `pricing` for it. Check the prices before you rely on a cap.
 - The token pre-check guesses three characters per token. It is an estimate.
 - A tool error text goes to the `detail` field of the event. The model sees only `tool failed`.
-- A model refusal stops the run. No automatic fallback model is set up.
+- A model refusal stops the run, unless you set a fallback model. `FallbackProvider(primary, fallback)` or `--fallback-model <id>` asks the second model once when the first refuses or fails. Each `turn_end` event has `answeredBy` with the model that answered. The text of the first model is held until its turn ends, so a turn with a fallback does not stream word by word. A refusal from the fallback stops the run. The fallback gets only the output room that the first ask left, and the caps count the input of both asks, so a token or cost cap holds. A first ask that failed after it streamed is counted by an estimate. If the fallback itself fails after it streamed, the totals of that run leave out the first ask. Its error text is not kept.
 
 ## Develop
 
