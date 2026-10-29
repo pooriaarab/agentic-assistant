@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.2
+
+Patch. No change to the SDK, CLI, React panel, or HTTP shape.
+
+Fixed
+
+- The optional peer `agentic-design` range is `>=0.5.0 <0.9.0` (was `>=0.5.0 <0.8.0`). A fresh `npm install agentic-assistant agentic-design@latest` no longer fails with ERESOLVE, because `agentic-design` 0.8.0 is in range. The `--agd-*` tokens the panel reads are the same 67 names and values in 0.7.1 and 0.8.0, so the panel needs no change.
+
+Changed
+
+- The dev dependency `agentic-design` is `^0.8.0`. The lockfile follows.
+
 ## 0.7.1
 
 Patch. No change to the SDK, CLI, React panel, or HTTP shape.
