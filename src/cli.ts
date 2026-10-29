@@ -129,6 +129,7 @@ export function parseCli(argv: string[]): Parsed {
       throw new UsageError(`--approve-call needs JSON like {"tool":"name","input":{}}, got ${text.slice(0, 80)}`);
     }
   });
+  if (values["fallback-model"] === "") throw new UsageError("--fallback-model needs a model id");
   const priceIn = number("--price-in", values["price-in"], false);
   const priceOut = number("--price-out", values["price-out"], false);
   if ((priceIn === undefined) !== (priceOut === undefined)) throw new UsageError("--price-in and --price-out go together");
@@ -227,7 +228,7 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
     case "turn_end":
       endText();
       if (event.answeredBy.fallback) {
-        io.err(`fallback model answered: ${oneLine(event.answeredBy.model, 100)} (first model: ${event.answeredBy.fallbackFor ?? "unknown"})`);
+        io.err(`fallback model answered: ${oneLine(event.answeredBy.model, 100)} (first model failed: ${event.answeredBy.fallbackFor ?? "unknown"})`);
       }
       break;
     case "tool_call":

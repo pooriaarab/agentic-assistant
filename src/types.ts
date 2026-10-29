@@ -62,6 +62,8 @@ export interface ModelProvider {
   readonly name: string;
   readonly model: string;
   readonly pricing?: Pricing;
+  /** Most requests one `stream` call may send to a model. Default 1. The loop counts the input of each in its caps. */
+  readonly maxAsks?: number;
   stream(request: ModelRequest): AsyncIterable<ModelEvent>;
 }
 

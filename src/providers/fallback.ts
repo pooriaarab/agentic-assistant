@@ -7,6 +7,9 @@ import {
   type Usage,
 } from "../types.js";
 
+// The same guess the loop uses to size a request.
+const CHARS_PER_TOKEN = 3;
+
 type Final = Extract<ModelEvent, { type: "message" }>;
 
 /**
@@ -17,11 +20,16 @@ type Final = Extract<ModelEvent, { type: "message" }>;
  * Text from the first model is held until its turn ends, so a refused turn shows no text from
  * it. A turn with a fallback model configured therefore streams after the turn ends, not word by word.
  * Usage counts both asks. The price is the higher of the two, so a cost cap never counts too little.
+ * The loop sizes the output room of a turn for one ask. The fallback gets only what the first ask left of it,
+ * and the loop counts the input twice (`maxAsks`), so a cap holds. A first ask that failed after it streamed
+ * is counted by an estimate of three characters per token, and its whole input. One that failed before it
+ * streamed anything is not counted.
  */
 export class FallbackProvider implements ModelProvider {
   readonly name: string;
   readonly model: string;
   readonly pricing?: Pricing;
+  readonly maxAsks = 2;
 
   constructor(
     private readonly primary: ModelProvider,
@@ -40,12 +48,18 @@ export class FallbackProvider implements ModelProvider {
 
   async *stream(request: ModelRequest): AsyncGenerator<ModelEvent> {
     const held: ModelEvent[] = [];
+    let heldChars = 0;
+    let started = false;
     let final: Final | undefined;
     let failure: unknown;
     try {
       for await (const event of this.primary.stream(request)) {
+        started = true;
         if (event.type === "message") final = event;
-        else held.push(event);
+        else {
+          held.push(event);
+          heldChars += event.text.length;
+        }
       }
       if (final === undefined) throw new ProviderError(`provider "${this.primary.name}" ended without a final message`);
     } catch (error) {
@@ -65,9 +79,23 @@ export class FallbackProvider implements ModelProvider {
     // A stopped run must not start a second ask.
     if (failure !== undefined && request.signal?.aborted) throw failure;
 
-    const spent: Usage = final?.usage ?? { inputTokens: 0, outputTokens: 0 };
+    let spent: Usage = { inputTokens: 0, outputTokens: 0 };
+    if (final !== undefined) spent = final.usage;
+    else if (started) {
+      spent = { inputTokens: Math.ceil(JSON.stringify(request.messages).length / CHARS_PER_TOKEN), outputTokens: Math.ceil(heldChars / CHARS_PER_TOKEN) };
+    }
+    const left = request.maxOutputTokens - spent.outputTokens;
+    if (!(left > 0)) {
+      // The first ask used the whole room. A second ask would pass the cap.
+      if (final !== undefined) {
+        for (const event of held) yield event;
+        yield { ...final, answeredBy: answered(this.primary) };
+        return;
+      }
+      throw failure;
+    }
     let second: Final | undefined;
-    for await (const event of this.fallback.stream(request)) {
+    for await (const event of this.fallback.stream({ ...request, maxOutputTokens: left })) {
       if (event.type === "message") second = event;
       else yield event;
     }

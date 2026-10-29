@@ -16,6 +16,9 @@ import { serveNotes } from "../test-fixtures/notes-http.mjs";
 // 7. A stopped run starts the fallback.
 // 8. A cost cap uses the cheaper price when the dearer model answers.
 // 9. The CLI flag does not reach a real endpoint.
+// 10. The fallback spends past a token or cost cap: its budget is not cut by what the first ask used.
+// 11. A first ask that failed after it streamed is not counted.
+// 12. An empty --fallback-model is accepted.
 
 const message = (text: string) => [{ role: "user" as const, content: [{ type: "text" as const, text }] }];
 
@@ -122,6 +125,52 @@ describe("FallbackProvider", () => {
     expect(done(events)?.totals.costUsd).toBeCloseTo(0.02, 10);
   });
 
+  test("the fallback gets only the output budget that the first ask left", async () => {
+    // maxTotalTokens 400 leaves a room of a few hundred tokens for one ask. The refused ask used 60 of the output room.
+    const primary = new Named("big-1", [{ text: "no", stopReason: "refusal", usage: { inputTokens: 10, outputTokens: 60 } }]);
+    const fallback = new Named("small-1", [{ text: "ok", usage: { inputTokens: 10, outputTokens: 5 } }]);
+    const events = await run(new FallbackProvider(primary, fallback), { limits: { maxTotalTokens: 400 } });
+    const first = primary.requests[0]?.maxOutputTokens as number;
+    expect(fallback.requests[0]?.maxOutputTokens).toBe(first - 60);
+    // The pre-check counted the input of both asks, so the first room is cut too.
+    const single = new Named("solo", [{ text: "ok" }]);
+    await run(single, { limits: { maxTotalTokens: 400 } });
+    expect(first).toBeLessThan(single.requests[0]?.maxOutputTokens as number);
+    expect(done(events)?.reason).toBe("end_turn");
+  });
+
+  test("a refusal that used the whole output room is returned as a refusal, with no second ask", async () => {
+    const primary = new Named("big-1", [{ text: "no", stopReason: "refusal", usage: { inputTokens: 10, outputTokens: 4096 } }]);
+    const fallback = new Named("small-1", [{ text: "late" }]);
+    const events = await run(new FallbackProvider(primary, fallback));
+    expect(done(events)?.reason).toBe("refusal");
+    expect(fallback.requests).toHaveLength(0);
+    expect(turn(events)?.answeredBy).toMatchObject({ model: "big-1", fallback: false });
+  });
+
+  test("a first ask that failed after it streamed is counted by an estimate", async () => {
+    const dropped: ModelProvider = {
+      name: "dropped",
+      model: "dropped-1",
+      async *stream() {
+        yield { type: "text_delta", text: "x".repeat(300) };
+        throw new Error("connection reset");
+      },
+    };
+    const fallback = new Named("small-1", [{ text: "ok", usage: { inputTokens: 10, outputTokens: 5 } }]);
+    const events = await run(new FallbackProvider(dropped, fallback));
+    const totals = done(events)?.totals;
+    // 300 characters of output at 3 per token is 100 tokens, and the input is counted again.
+    expect(totals?.outputTokens).toBe(105);
+    expect(totals?.inputTokens).toBeGreaterThan(10);
+    expect(text(events)).toBe("ok");
+  });
+
+  test("a first ask that failed before it streamed anything costs nothing", async () => {
+    const events = await run(new FallbackProvider(new Broken(), new Named("small-1", [{ text: "ok", usage: { inputTokens: 10, outputTokens: 5 } }])));
+    expect(done(events)?.totals).toMatchObject({ inputTokens: 10, outputTokens: 5 });
+  });
+
   test("one model without a price leaves the pair without a price", () => {
     const priced = new Named("a", [], { inputPerMTok: 1, outputPerMTok: 1 });
     expect(new FallbackProvider(priced, new Named("b", [])).pricing).toBeUndefined();
@@ -180,8 +229,15 @@ describe("--fallback-model", () => {
     const result = await chat(["--fallback-model", "backup-model"]);
     expect(result.code).toBe(0);
     expect(result.out).toContain("from the backup");
-    expect(result.err).toContain("fallback model answered: backup-model (first model: error)");
+    expect(result.err).toContain("fallback model answered: backup-model (first model failed: error)");
     expect(result.asked).toEqual(["first-model", "backup-model"]);
+  });
+
+  test("an empty --fallback-model is a usage error", async () => {
+    const result = await chat(["--fallback-model", ""]);
+    expect(result.code).toBe(2);
+    expect(result.err).toContain("--fallback-model needs a model id");
+    expect(result.asked).toEqual([]);
   });
 
   test("without the flag the same failure stops the run", async () => {

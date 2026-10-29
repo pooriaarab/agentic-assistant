@@ -243,6 +243,8 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       return;
     }
     // The most output this request may use, and the cap that sets it.
+    // A provider that may ask twice can use the input twice, so the pre-check counts it twice.
+    estimatedInput *= provider.maxAsks ?? 1;
     let room = limits.maxOutput;
     let limitedBy: DoneReason = "token_cap";
     if (limits.maxTotalTokens !== undefined) {

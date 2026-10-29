@@ -178,7 +178,7 @@ Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat
 - A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices are from 2026-10-06. Check them.
 - The token pre-check guesses three characters per token. It is an estimate.
 - A tool error text goes to the `detail` field of the event. The model sees only `tool failed`.
-- A model refusal stops the run, unless you set a fallback model. `FallbackProvider(primary, fallback)` or `--fallback-model <id>` asks the second model once when the first refuses or fails. Each `turn_end` event has `answeredBy` with the model that answered. The text of the first model is held until its turn ends, so a turn with a fallback does not stream word by word. A refusal from the fallback stops the run.
+- A model refusal stops the run, unless you set a fallback model. `FallbackProvider(primary, fallback)` or `--fallback-model <id>` asks the second model once when the first refuses or fails. Each `turn_end` event has `answeredBy` with the model that answered. The text of the first model is held until its turn ends, so a turn with a fallback does not stream word by word. A refusal from the fallback stops the run. The fallback gets only the output room that the first ask left, and the caps count the input of both asks, so a token or cost cap holds. A first ask that failed after it streamed is counted by an estimate. Its error text is not kept.
 
 ## Develop
 
