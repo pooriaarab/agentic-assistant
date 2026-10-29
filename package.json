@@ -104,5 +104,8 @@
     "react": {
       "optional": true
     }
+  },
+  "overrides": {
+    "zod": "^4.6.7"
   }
 }
