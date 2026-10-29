@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1
+
+Patch. No change to the SDK, CLI or HTTP shape.
+
+Changed
+
+- `agentic-identity` is `^0.8.0`. The lockfile follows. The 0.8.0 additions (`tokens create`, `delegations create`) are not used here.
+- `agentic-design` dev and peer dependency is `^0.5.0`. Version 0.5.0 changes color values only. Token names and the `agd-` prefix do not change.
+
 ## 0.6.0
 
 Changed
