@@ -104,8 +104,9 @@ export interface AssistantClient {
   health(options?: CallOptions): Promise<Health>;
   tools(options?: CallOptions): Promise<ToolInfo[]>;
   /**
-   * Starts one new conversation and yields its events, ending with `done` (or `error`). The stream stays
-   * open while a risky call waits for a person. Stop reading, or abort the signal, to stop the run.
+   * Yields the events of one new conversation, ending with `done` (or `error`). The request is sent on the
+   * first read, not when you call `chat`. The stream stays open while a risky call waits for a person.
+   * Stop reading, or abort the signal, to stop the run. A stream that ends with no `done` or `error` throws.
    */
   chat(message: string, options?: CallOptions): AsyncGenerator<ChatEvent, void, undefined>;
   approvals(options?: CallOptions): Promise<PendingApproval[]>;
@@ -118,9 +119,9 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const isString = (v: unknown) => typeof v === "string";
 const RISKS = ["safe", "risky", "irreversible"];
 const isTool = (v: unknown) =>
-  isObject(v) && isString(v.name) && isString(v.description) && isString(v.scope) && RISKS.includes(v.risk as string);
+  isObject(v) && isString(v.name) && isString(v.description) && isString(v.scope) && RISKS.includes(v.risk as string) && "inputSchema" in v;
 const isPending = (v: unknown) =>
-  isObject(v) && isString(v.id) && isString(v.tool) && isString(v.digest) && isObject(v.input) && isObject(v.proposedBy) && isString(v.requestedBy) && typeof v.canDecide === "boolean";
+  isObject(v) && isString(v.id) && isString(v.tool) && RISKS.includes(v.risk as string) && isString(v.digest) && isObject(v.input) && isObject(v.proposedBy) && isString(v.requestedBy) && typeof v.canDecide === "boolean";
 
 // A success reply must have the expected shape, or the call fails. A proxy or a wrong baseUrl can answer 200 with any body.
 const SHAPES = {
@@ -130,8 +131,31 @@ const SHAPES = {
   decision: (v: unknown) => isObject(v) && isString(v.requestId) && typeof v.approved === "boolean" && isString(v.decidedBy) && typeof v.machineMade === "boolean",
 };
 
-/** The longest block the client buffers while it waits for the end of one event. */
-const MAX_EVENT_BYTES = 4_194_304;
+/** The most characters the client buffers while it waits for the end of one event. */
+const MAX_EVENT_CHARS = 4_194_304;
+const EVENT_TYPES = ["run_start", "turn_start", "text_delta", "tool_call", "approval_request", "approval_decision", "tool_result", "turn_end", "done", "error"];
+/** Checks the fields that a caller reads to tell success from a stop. */
+const isEvent = (v: unknown): boolean => {
+  if (!isObject(v) || typeof v.type !== "string" || !EVENT_TYPES.includes(v.type)) return false;
+  switch (v.type) {
+    case "done":
+      return isString(v.reason) && isObject(v.totals);
+    case "error":
+      return isString(v.error);
+    case "text_delta":
+      return isString(v.text);
+    case "tool_result":
+      return isString(v.id) && isString(v.name) && isString(v.content) && typeof v.isError === "boolean";
+    case "tool_call":
+      return isString(v.id) && isString(v.name);
+    case "approval_request":
+      return isObject(v.request) && isString(v.request.id) && isString(v.request.digest);
+    case "approval_decision":
+      return isString(v.requestId) && typeof v.approved === "boolean";
+    default:
+      return true;
+  }
+};
 
 export function createClient(options: ClientOptions): AssistantClient {
   if (typeof options.baseUrl !== "string" || options.baseUrl === "") throw new TypeError("createClient needs a baseUrl");
@@ -142,7 +166,11 @@ export function createClient(options: ClientOptions): AssistantClient {
   } catch {
     throw new TypeError("baseUrl must be an absolute URL");
   }
-  if (origin.protocol !== "https:" && origin.protocol !== "http:") throw new TypeError("baseUrl must be an http or https URL");
+  // The token goes in every request, so plain http is for this machine only.
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
+  if (origin.protocol !== "https:" && !(origin.protocol === "http:" && local)) {
+    throw new TypeError("baseUrl must be an https URL, or an http URL on localhost, 127.0.0.1, or [::1]");
+  }
   if (origin.search !== "" || origin.hash !== "" || origin.username !== "" || origin.password !== "") {
     throw new TypeError("baseUrl must have no query, hash, or credentials");
   }
@@ -160,8 +188,8 @@ export function createClient(options: ClientOptions): AssistantClient {
     return encodeURIComponent(value);
   };
 
-  async function request(url: string, method: string, body: unknown, callOptions: CallOptions | undefined): Promise<Response> {
-    const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  async function request(url: string, method: string, body: unknown, callOptions: CallOptions | undefined, authed = true): Promise<Response> {
+    const headers: Record<string, string> = authed ? { authorization: `Bearer ${token}` } : {};
     if (body !== undefined) headers["content-type"] = "application/json";
     return send(url, {
       method,
@@ -186,12 +214,12 @@ export function createClient(options: ClientOptions): AssistantClient {
     if (response.status === 503 && error === "not_configured") code = "NOT_CONFIGURED";
     // A reply with no error body is not from this API.
     if (typeof error !== "string") code = response.status >= 500 ? "INTERNAL" : "UNKNOWN";
-    const wait = Number(response.headers.get("retry-after"));
-    return new AssistantApiError(code, response.status, message, Number.isFinite(wait) && wait >= 0 && response.headers.get("retry-after") !== null ? wait : undefined);
+    const after = response.headers.get("retry-after")?.trim() ?? "";
+    return new AssistantApiError(code, response.status, message, /^\d{1,9}$/.test(after) ? Number(after) : undefined);
   }
 
-  async function call<T>(url: string, method: string, body: unknown, callOptions: CallOptions | undefined, shape: keyof typeof SHAPES): Promise<T> {
-    const response = await request(url, method, body, callOptions);
+  async function call<T>(url: string, method: string, body: unknown, callOptions: CallOptions | undefined, shape: keyof typeof SHAPES, authed = true): Promise<T> {
+    const response = await request(url, method, body, callOptions, authed);
     if (!response.ok) throw await failure(response);
     let parsed: unknown;
     try {
@@ -213,19 +241,35 @@ export function createClient(options: ClientOptions): AssistantClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let ended = false;
+    // Reads the complete events in the buffer. A "\r" at the end waits for the next chunk, as it may start "\r\n".
+    function* drain(final: boolean): Generator<ChatEvent> {
+      const text = final ? buffer : buffer.replace(/\r$/, "");
+      const normal = text.replace(/\r\n?/g, "\n");
+      const rest = buffer.slice(text.length);
+      let from = 0;
+      for (let end = normal.indexOf("\n\n", from); end >= 0; end = normal.indexOf("\n\n", from)) {
+        const event = parseBlock(normal.slice(from, end), response.status);
+        from = end + 2;
+        if (event === undefined) continue;
+        if (ended) throw new AssistantApiError("UNKNOWN", response.status, "an event came after the end of the stream");
+        ended = event.type === "done" || event.type === "error";
+        yield event;
+      }
+      buffer = normal.slice(from) + rest;
+    }
     try {
       for (;;) {
         const chunk = await reader.read();
         if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true }).replace(/\r\n?/g, "\n");
-        for (let end = buffer.indexOf("\n\n"); end >= 0; end = buffer.indexOf("\n\n")) {
-          const block = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const event = parseBlock(block, response.status);
-          if (event !== undefined) yield event;
-        }
-        if (buffer.length > MAX_EVENT_BYTES) throw new AssistantApiError("UNKNOWN", response.status, "an event is too long");
+        buffer += decoder.decode(chunk.value, { stream: true });
+        yield* drain(false);
+        if (buffer.length > MAX_EVENT_CHARS) throw new AssistantApiError("UNKNOWN", response.status, "an event is too long");
       }
+      buffer += decoder.decode();
+      yield* drain(true);
+      // The server always ends with "done" or "error". Anything else is a cut stream, not a finished run.
+      if (!ended || buffer.trim() !== "") throw new AssistantApiError("UNKNOWN", response.status, "the stream ended before a done event");
     } finally {
       // Stops the run on the server when the caller stops reading.
       await reader.cancel().catch(() => undefined);
@@ -242,18 +286,24 @@ export function createClient(options: ClientOptions): AssistantClient {
     } catch {
       parsed = undefined;
     }
-    if (!isObject(parsed) || typeof parsed.type !== "string") throw new AssistantApiError("UNKNOWN", status, "an event is not valid");
+    if (!isEvent(parsed)) throw new AssistantApiError("UNKNOWN", status, "an event is not valid");
     return parsed as unknown as ChatEvent;
   }
 
+  // A decision for another call than the one sent is not a decision for this one.
+  const decided = (id: string, decision: Decision): Decision => {
+    if (decision.requestId !== id) throw new AssistantApiError("UNKNOWN", 200, "the reply is for another approval");
+    return decision;
+  };
+
   const methods: AssistantClient = {
-    // /health is outside /api/v1 and needs no token. The client still sends one, as the Worker ignores it.
-    health: async (o) => call(`${origin.origin}${prefix}/health`, "GET", undefined, o, "health"),
+    // /health is outside /api/v1 and needs no token, so the client sends none.
+    health: async (o) => call(`${origin.origin}${prefix}/health`, "GET", undefined, o, "health", false),
     tools: async (o) => (await call<{ tools: ToolInfo[] }>(`${root}/tools`, "GET", undefined, o, "tools")).tools,
     chat,
     approvals: async (o) => (await call<{ approvals: PendingApproval[] }>(`${root}/approvals`, "GET", undefined, o, "approvals")).approvals,
-    approve: async (id, digest, o) => call(`${root}/approvals/${seg(id)}/approve`, "POST", { digest }, o, "decision"),
-    deny: async (id, reason, o) => call(`${root}/approvals/${seg(id)}/deny`, "POST", reason === undefined ? {} : { reason }, o, "decision"),
+    approve: async (id, digest, o) => decided(id, await call<Decision>(`${root}/approvals/${seg(id)}/approve`, "POST", { digest }, o, "decision")),
+    deny: async (id, reason, o) => decided(id, await call<Decision>(`${root}/approvals/${seg(id)}/deny`, "POST", reason === undefined ? {} : { reason }, o, "decision")),
   };
   return methods;
 }

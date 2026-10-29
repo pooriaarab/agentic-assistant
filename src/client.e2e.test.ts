@@ -15,6 +15,8 @@ import { createWorker } from "./worker.js";
 // 6. A stream that ends with an error event, or a bad event, is read as success.
 // 7. An id with "..", "/" or "%" reaches another route.
 // 8. A bad baseUrl or token is accepted. The fetch option is ignored, or called with the wrong `this`.
+// 10. A cut stream, or one with events after its end, reads as a finished run.
+// 11. The token goes over plain http to a remote host, or to /health.
 // 9. Stopping the read or aborting the signal leaves the run on the server.
 
 const TOKEN = "k".repeat(40);
@@ -160,16 +162,39 @@ describe("errors", () => {
 describe("chat stream", () => {
   const sse = (chunks: string[], type = "text/event-stream") =>
     replying(() => new Response(new ReadableStream({ start(c) { for (const chunk of chunks) c.enqueue(new TextEncoder().encode(chunk)); c.close(); } }), { headers: { "content-type": type } }));
-  const done = `event: done\ndata: {"type":"done","reason":"end_turn"}\n\n`;
+  const done = `event: done\ndata: {"type":"done","reason":"end_turn","totals":{}}\n\n`;
 
   test("an event cut across chunks, and CRLF line ends, still parse", async () => {
     const events = await collect(sse([`event: text_delta\ndata: {"type":"text_`, `delta","text":"hi"}\n`, `\n`, done.replace(/\n/g, "\r\n")]).chat("x"));
-    expect(events).toEqual([{ type: "text_delta", text: "hi" }, { type: "done", reason: "end_turn" }]);
+    expect(events).toEqual([{ type: "text_delta", text: "hi" }, { type: "done", reason: "end_turn", totals: {} }]);
   });
 
   test("an error event is passed on as an event", async () => {
     const events = await collect(sse([`event: error\ndata: {"type":"error","error":"the run failed"}\n\n`]).chat("x"));
     expect(events).toEqual([{ type: "error", error: "the run failed" }]);
+  });
+
+  test("a CRLF cut between two chunks is not a boundary", async () => {
+    const events = await collect(sse([`data: {"type":"text_delta",\r`, `\n`, `data: "text":"hi"}\r\n\r\n`, done]).chat("x"));
+    expect(events[0]).toEqual({ type: "text_delta", text: "hi" });
+  });
+
+  test("a stream with no done, a partial last event, or events after done fails", async () => {
+    const delta = `data: {"type":"text_delta","text":"hi"}\n\n`;
+    const cut = await fails(collect(sse([delta]).chat("x")));
+    expect(cut.message).toMatch(/before a done/);
+    expect((await fails(collect(sse([delta, `data: {"type":"done","reason":"end_t`]).chat("x")))).code).toBe("UNKNOWN");
+    expect((await fails(collect(sse([done, delta]).chat("x")))).message).toMatch(/after the end/);
+    // The caller still gets the events that came before the cut.
+    const got: ChatEvent[] = [];
+    await fails((async () => { for await (const e of sse([delta]).chat("x")) got.push(e); })());
+    expect(got).toHaveLength(1);
+  });
+
+  test("an event of the wrong shape fails", async () => {
+    for (const data of [`{"type":"done"}`, `{"type":"done","reason":"end_turn"}`, `{"type":"mystery"}`, `{"type":"error"}`, `{"type":"tool_result"}`, `{"type":"text_delta"}`]) {
+      expect((await fails(collect(sse([`data: ${data}\n\n`]).chat("x")))).code).toBe("UNKNOWN");
+    }
   });
 
   test("a bad event, a wrong content type, and a huge event fail", async () => {
@@ -206,6 +231,37 @@ describe("chat stream", () => {
 });
 
 describe("options and inputs", () => {
+  test("health sends no token, and deny sends its reason", async () => {
+    const { client, seen } = await world([]);
+    await client.health();
+    expect(seen[0]?.headers.get("authorization")).toBeNull();
+    const bodies: string[] = [];
+    const spy = createClient({ baseUrl: "https://assistant.test", token: TOKEN, fetch: async (_i, init) => (bodies.push(String(init?.body)), Response.json({ requestId: "a", approved: false, decidedBy: "ana", machineMade: false })) });
+    await spy.deny("a", "too risky");
+    await spy.deny("a");
+    expect(bodies).toEqual([`{"reason":"too risky"}`, "{}"]);
+    // A reply for another call is refused.
+    expect((await fails(spy.deny("b"))).code).toBe("UNKNOWN");
+  });
+
+  test("an empty or odd retry-after is not a delay", async () => {
+    for (const value of ["", "soon", "-1"]) {
+      const error = await fails(replying(() => Response.json({ error: "slow" }, { status: 429, headers: { "retry-after": value } })).tools());
+      expect(error.retryAfter).toBeUndefined();
+    }
+  });
+
+  test("a redirect from the real route stays unfollowed, and an abort carries the reason", async () => {
+    const calls: string[] = [];
+    const client = createClient({ baseUrl: "https://assistant.test", token: TOKEN, fetch: async (input) => (calls.push(String(input)), new Response("", { status: 302, headers: { location: "https://evil.test/x" } })) });
+    await fails(client.tools());
+    expect(calls).toEqual(["https://assistant.test/api/v1/tools"]);
+    const abort = new AbortController();
+    abort.abort(new Error("stop"));
+    const aborting = createClient({ baseUrl: "https://assistant.test", token: TOKEN, fetch: async (_i, init) => { init?.signal?.throwIfAborted(); return Response.json({}); } });
+    await expect(aborting.tools({ signal: abort.signal })).rejects.toThrow("stop");
+  });
+
   test("redirects are not followed", async () => {
     let init: RequestInit | undefined;
     const client = createClient({ baseUrl: "https://assistant.test", token: TOKEN, fetch: async (_i, i) => ((init = i), Response.json({ tools: [] })) });
@@ -221,8 +277,11 @@ describe("options and inputs", () => {
   });
 
   test("a bad baseUrl or token is refused, and a path prefix is kept", async () => {
-    for (const baseUrl of ["", "nope", "ftp://a.test", "https://a.test?x=1", "https://a.test#x", "https://u:p@a.test"]) {
+    for (const baseUrl of ["", "nope", "ftp://a.test", "http://a.test", "http://127.0.0.1.evil.test", "https://a.test?x=1", "https://a.test#x", "https://u:p@a.test"]) {
       expect(() => createClient({ baseUrl, token: TOKEN })).toThrow(TypeError);
+    }
+    for (const baseUrl of ["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787", "https://a.test"]) {
+      expect(() => createClient({ baseUrl, token: TOKEN })).not.toThrow();
     }
     expect(() => createClient({ baseUrl: "https://a.test", token: "" })).toThrow(TypeError);
     const urls: string[] = [];

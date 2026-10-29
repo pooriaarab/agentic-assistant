@@ -190,7 +190,7 @@ The assistant holds the caller's scopes and no more. A chat turn waits at a risk
 
 ## Use the HTTP client
 
-`agentic-assistant/client` is a typed client for the hosted API routes. It uses only `fetch`, so it runs in browsers, Workers, and Node.
+`agentic-assistant/client` is a typed client for the hosted API routes. It uses only `fetch`, so it runs in Workers and Node. In a browser it works on the same origin only, because the API sends no CORS headers.
 
 ```ts
 import { createClient, AssistantApiError } from "agentic-assistant/client";
@@ -209,8 +209,8 @@ try {
 ```
 
 - The methods match the routes: `health`, `tools`, `chat`, `approvals`, `approve`, `deny`. Each takes an optional `{ signal }` as its last argument.
-- `chat` is an async generator of the same events as `runAssistant`, ending with `done`. A run that fails on the server ends with an `error` event. Stop reading to stop the run. The stream stays open while a risky call waits, so decide from another call.
-- `baseUrl` is the Worker URL, `http` or `https`, with no query, hash, or credentials. Pass `fetch` to use your own.
+- `chat` is an async generator of the same events as `runAssistant`, ending with `done`. It sends the request on the first read. A run that fails on the server ends with an `error` event. A stream that ends with no `done` or `error` throws `UNKNOWN`: the run did not finish. Stop reading to stop the run. The stream stays open while a risky call waits, so decide from another call.
+- `baseUrl` is the Worker URL: `https`, or `http` on `localhost`, `127.0.0.1`, or `[::1]`, with no query, hash, or credentials. A path prefix is for a host that strips it before the Worker. Pass `fetch` to use your own. `health` sends no token.
 - A failed call throws `AssistantApiError`. `code` is `INVALID_INPUT`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `CONFLICT`, `RATE_LIMITED`, `NOT_CONFIGURED`, `INTERNAL`, or `UNKNOWN`. `status` is the HTTP status. `retryAfter` is set for a 429. A `200` reply with the wrong shape fails as `UNKNOWN`.
 - The client never follows a redirect and never retries. A decision that you abort after the client sends it can still apply: read `approvals()` before you try again.
 
