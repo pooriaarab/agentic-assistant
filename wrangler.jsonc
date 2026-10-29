@@ -1,9 +1,10 @@
 {
-  // Sample worker config. Rename agentic-assistant on clone, then run
-  // wrangler deploy from the pack root.
+  // Sample worker config for your own deploy. It deploys the demo entry (one demo tool and prompt): build a Worker with createWorker for your own tools. Set the secrets ASSISTANT_TOKENS and MODEL_KEY,
+  // and the var MODEL_URL (or MODEL_USE_DEFAULT_ENDPOINT=1), run npm run build, then wrangler deploy from the pack root.
   "name": "agentic-assistant",
-  "main": "src/worker.ts",
+  "main": "dist/demo.js",
   "compatibility_date": "2026-01-01",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "PACK_NAME": "agentic-assistant"

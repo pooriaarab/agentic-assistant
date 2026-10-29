@@ -217,7 +217,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
       },
     });
     return new Response(body, {
-      headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
+      headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no", "x-ai-generated": "true" },
     });
   }
 

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Added
+
+- A demo Worker entry (`dist/demo.js`, built from `src/demo.ts`), `wrangler.demo.jsonc`, and `npm run deploy:demo`. It serves a demo page, `/health`, and the `/api/v1` routes with bearer auth. With no model key, chat answers 503 `not_configured`.
+- `createStaticTokenAuth`, an `agentic-identity` `Auth` for a fixed map of bearer tokens.
+- Chat responses carry the header `x-ai-generated: true`.
+- A small schema checker for hosts that refuse code generation, such as Workers. It fails closed on keywords it does not support.
+
+Removed
+
+- The default export of `agentic-assistant/worker` (a stub that answered `/health` only). Use `createWorker`.
+
 Changed
 
 - The package needs Node.js 22 or newer. `agentic-identity` needs Node 22, so `engines.node` is now `>=22`. It was `>=18`.

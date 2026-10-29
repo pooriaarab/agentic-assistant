@@ -6,7 +6,7 @@ Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
 
 - SDK: import { runAssistant, ToolRegistry, createPrincipal } from "agentic-assistant".
 - CLI: agentic-assistant chat --tools <mcp-url> --scope <s> --tool-scope <s> "message". MCP server: agentic-assistant mcp.
-- HTTP API: import { createWorker } from "agentic-assistant/worker". Routes under /api/v1: GET /tools, POST /chat (SSE), GET /approvals, POST /approvals/:id/approve|deny. Sign-in with agentic-identity principals.
+- HTTP API: import { createWorker } from "agentic-assistant/worker". Routes under /api/v1: GET /tools, POST /chat (SSE), GET /approvals, POST /approvals/:id/approve|deny. Sign-in with agentic-identity principals. Chat responses carry x-ai-generated: true. Demo: https://agentic-assistant-demo.hello-fd1.workers.dev (needs a bearer key; no model key set, so chat answers 503 not_configured).
 - AI marking: events carry `provenance`; use provenanceLabel and provenanceMarker (JSON-LD, IPTC trainedAlgorithmicMedia). Also in HTTP, CLI --json and MCP results.
 - Panel: import { AssistantPanel } from "agentic-assistant/react"; import "agentic-assistant/react.css".
 - Test provider: import { ScriptedProvider } from "agentic-assistant/testing".

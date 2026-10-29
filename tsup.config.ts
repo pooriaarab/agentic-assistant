@@ -11,6 +11,7 @@ export default defineConfig({
     testing: "src/testing.ts",
     cli: "src/cli.ts",
     worker: "src/worker.ts",
+    demo: "src/demo.ts",
     react: "src/react/index.ts",
   },
   format: ["esm"],

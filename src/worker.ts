@@ -3,6 +3,8 @@ import { VERSION } from "./version.js";
 
 export { APPROVER_SCOPE, createAssistantApi } from "./api.js";
 export type { AssistantApiOptions } from "./api.js";
+export { createStaticTokenAuth } from "./static-auth.js";
+export type { StaticTokenEntry } from "./static-auth.js";
 
 export interface WorkerEnv {
   PACK_NAME?: string;
@@ -22,15 +24,3 @@ export function createWorker(options: AssistantApiOptions): { fetch(request: Req
     },
   };
 }
-
-/** The sample Worker has no auth, tools, or model, so it serves `/health` only. Use `createWorker` for the API. */
-export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return health(env);
-    if (url.pathname.startsWith("/api/v1/")) {
-      return Response.json({ error: "the API is not set up: build the Worker with createWorker" }, { status: 503 });
-    }
-    return Response.json({ error: "not found" }, { status: 404 });
-  },
-};

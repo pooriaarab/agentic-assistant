@@ -1,6 +1,7 @@
 import Ajv2020Module from "ajv/dist/2020.js";
 import type { AssistantPrincipal } from "./principal.js";
 import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
+import { canGenerateCode, compileFallback } from "./schema-fallback.js";
 import { parseScope, type Scope } from "./scopes.js";
 import type { JsonSchema, ToolSpec } from "./types.js";
 
@@ -30,6 +31,7 @@ export function defineTool<Input>(tool: ToolDefinition<Input>): ToolDefinition {
 // ajv is CommonJS. Under NodeNext the default import is the module, and `.default` is the class.
 const Ajv2020 = Ajv2020Module.default;
 
+// Workers and other hosts refuse `new Function`, which Ajv needs. They use a small checker that fails closed.
 const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const MAX_ERROR_CHARS = 200;
 
@@ -54,6 +56,19 @@ export class ToolRegistry {
   // One validator per registry, so an `$id` in one tool's schema cannot clash with another registry's.
   private readonly ajv = new Ajv2020({ strict: false, logger: false, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
 
+  /**
+   * Ajv builds validators with `new Function`. Workers refuse that inside a request, though not while a module loads.
+   * So try Ajv first, and use the small checker when this host refuses code generation. A bad schema still throws.
+   */
+  private compile(schema: Record<string, unknown>): ValidateWithErrors {
+    try {
+      return this.ajv.compile(schema) as ValidateWithErrors;
+    } catch (error) {
+      if (canGenerateCode()) throw error;
+      return compileFallback(schema) as ValidateWithErrors;
+    }
+  }
+
   register(tool: ToolDefinition): this {
     if (!NAME_PATTERN.test(tool.name)) throw new Error(`invalid tool name "${tool.name}"`);
     if (this.tools.has(tool.name)) throw new Error(`tool "${tool.name}" is already registered`);
@@ -67,7 +82,7 @@ export class ToolRegistry {
     const { $schema: _draft, $id: _id, ...schema } = tool.inputSchema;
     let validate: ValidateWithErrors;
     try {
-      validate = this.ajv.compile(schema) as ValidateWithErrors;
+      validate = this.compile(schema);
     } catch (error) {
       throw new Error(`tool "${tool.name}" has an invalid input schema: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -147,6 +147,7 @@ describe("chat", () => {
     const response = await w.post("/chat", token, { message: "read n1" });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(response.headers.get("x-ai-generated")).toBe("true");
     const list = await events(response).all();
     const names = list.map((e) => e.event);
     expect(names[0]).toBe("run_start");

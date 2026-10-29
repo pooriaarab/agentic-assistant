@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ToolRegistry, defineTool } from "./tools.js";
 
 // Ways input validation can fail. Each one is a case below.
@@ -89,5 +89,21 @@ describe("input validation", () => {
       handler: ({ id }) => id.toUpperCase(),
     });
     expect(new ToolRegistry().register(tool).get("typed")?.name).toBe("typed");
+  });
+});
+
+describe("a host that refuses code generation", () => {
+  const tool = { name: "t", description: "t", inputSchema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"] }, scope: "a:read", risk: "safe" as const, handler: () => "ok" };
+  test("checks input with the small checker, and still refuses a schema it cannot enforce", () => {
+    const real = globalThis.Function;
+    vi.stubGlobal("Function", new Proxy(real, { construct() { throw new EvalError("Code generation from strings disallowed"); }, apply() { throw new EvalError("Code generation from strings disallowed"); } }));
+    try {
+      const registry = new ToolRegistry().register(tool);
+      expect(registry.checkInput("t", { n: 1 })).toBeUndefined();
+      expect(registry.checkInput("t", { n: "1" })).toMatch(/integer/);
+      expect(() => new ToolRegistry().register({ ...tool, inputSchema: { type: "object", $ref: "#/x" } })).toThrow(/not supported/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

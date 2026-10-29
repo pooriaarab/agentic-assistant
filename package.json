@@ -63,6 +63,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
+    "deploy:demo": "npm run build && WRANGLER_SEND_METRICS=false wrangler deploy --config wrangler.demo.jsonc",
     "prepack": "npm run build",
     "ci:local": "npm run build && npm run typecheck && npm test"
   },
@@ -84,7 +85,8 @@
     "react-dom": "^19.3.1",
     "tsup": "^8.0.0",
     "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "wrangler": "^4.155.0"
   },
   "peerDependencies": {
     "react": ">=18"
