@@ -183,7 +183,7 @@ Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key 
 | `POST /approvals/:id/approve` `{"digest":"..."}` | Approve the exact call. A wrong digest is a 409. |
 | `POST /approvals/:id/deny` `{"reason":"..."}` | Refuse the call. |
 
-The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. The list hides a call whose tool the caller has no scope for. If a client hangs up, the run stops and its pending calls go. If the key is revoked or its scopes change during a run, the run stops before its next tool call.
+The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. The same holds for an agent it made and for the agent that made it. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. The list hides a call whose tool the caller has no scope for. If a client hangs up, the run stops and its pending calls go. If the key is revoked or its scopes change during a run, the run stops before its next tool call.
 
 ## Features
 

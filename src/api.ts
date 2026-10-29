@@ -32,6 +32,8 @@ interface Caller {
   kind: string;
   /** The first principal of the chain: the person or the agent that owns it. */
   rootId: string;
+  /** Ids from the root to this principal. */
+  chain: string[];
   scopes: string[];
 }
 
@@ -54,15 +56,16 @@ function toCaller(context: PrincipalContext | null): Caller | undefined {
   if (!Array.isArray(chain) || chain.length === 0 || chain[chain.length - 1]?.id !== principalId) return undefined;
   // The kind must agree with the chain: the last step is the caller, and a person has no parent.
   if (chain[chain.length - 1]?.kind !== kind || (kind === "human" && chain.length !== 1)) return undefined;
-  const rootId = chain[0]?.id;
-  if (typeof rootId !== "string" || rootId === "") return undefined;
+  const ids = chain.map((step) => step?.id);
+  if (ids.some((id) => typeof id !== "string" || id === "")) return undefined;
+  const rootId = ids[0] as string;
   if (!Array.isArray(scopes)) return undefined;
   try {
     for (const scope of scopes) parseScope(scope);
   } catch {
     return undefined;
   }
-  return { id: principalId, kind, rootId, scopes: [...scopes] };
+  return { id: principalId, kind, rootId, chain: ids as string[], scopes: [...scopes] };
 }
 
 const assistantId = (caller: Caller): string => `assistant:${caller.id}`;
@@ -113,8 +116,13 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
   /** Why this caller may not decide on this call, or undefined when it may. */
   function whyNotDecide(caller: Caller, entry: Pending): string | undefined {
     // The proposer is the assistant, and the principal that asked it. A person who asks may decide.
-    if (caller.id === assistantId(entry.proposer) || (entry.proposer.kind !== "human" && caller.id === entry.proposer.id)) {
-      return "an agent cannot decide on its own action";
+    const { proposer } = entry;
+    if (caller.id === assistantId(proposer)) return "an agent cannot decide on its own action";
+    if (proposer.kind !== "human") {
+      // An agent, an agent it made, and the agent that made it all count as one side. Only the person above them may decide.
+      if (caller.chain.includes(proposer.id) || (caller.kind !== "human" && proposer.chain.includes(caller.id))) {
+        return "an agent cannot decide on its own action, or on one from an agent it made or that made it";
+      }
     }
     if (caller.kind !== "human" && !hasScope(caller.scopes, APPROVER_SCOPE)) {
       return `an agent needs the ${APPROVER_SCOPE} scope to decide`;
@@ -143,7 +151,6 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
 
   function chat(request: Request, caller: Caller, message: string): Response {
     const abort = new AbortController();
-    request.signal.addEventListener("abort", () => abort.abort(), { once: true });
     running.set(caller.id, (running.get(caller.id) ?? 0) + 1);
     let released = false;
     const release = () => {
@@ -153,6 +160,14 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
       if (left <= 0) running.delete(caller.id);
       else running.set(caller.id, left);
     };
+    request.signal.addEventListener(
+      "abort",
+      () => {
+        abort.abort();
+        release();
+      },
+      { once: true },
+    );
     let events: AsyncGenerator<AssistantEvent>;
     try {
       events = runAssistant({

@@ -19,7 +19,9 @@ import { createWorker } from "./worker.js";
 // 12. The pending list shows the arguments of a tool the caller has no scope for.
 // 13. Two decisions sent together both succeed, so a no is reported while the tool runs.
 // 14. A context whose kind disagrees with its chain skips the agent rules.
-// 15. A key that is narrowed during a run keeps its old scopes.
+// 15. An agent decides through an agent it made, or through the agent that made it.
+// 16. A client abort leaves the run slot taken.
+// 17. A key that is narrowed during a run keeps its old scopes.
 
 const base = "https://assistant.test/api/v1";
 const ANA = "human:ana";
@@ -44,7 +46,7 @@ function world(scripts: ScriptedTurn[] | (() => ScriptedProvider)) {
     },
   });
   const token = (principalId: string, kind: string, chain: string[], scopes: string[]) =>
-    memory.issue({ principalId, kind, chain: chain.map((id, i) => ({ id, kind: i === 0 ? "human" : "agent_of_human" })), scopes } as never);
+    memory.issue({ principalId, kind, chain: chain.map((id, i) => ({ id, kind: i === 0 ? "human" : i === chain.length - 1 ? kind : "agent_of_human" })), scopes } as never);
   const call = (path: string, token_?: string, init: RequestInit = {}) =>
     worker.fetch(new Request(`${base}${path}`, { ...init, headers: { ...(token_ ? { authorization: `Bearer ${token_}` } : {}), ...(init.body ? { "content-type": "application/json" } : {}) } }));
   const post = (path: string, token_: string | undefined, body: unknown) => call(path, token_, { method: "POST", body: JSON.stringify(body) });
@@ -194,6 +196,18 @@ describe("chat", () => {
     expect(chunks).toBeLessThan(50);
   });
 
+  test("a client that aborts the request frees the run slot even if the stream is never cancelled", async () => {
+    const hang = () => ({ stream: () => new Promise<never>(() => undefined), name: "hang", model: "hang-1" }) as never;
+    const w = world(hang);
+    const token = await w.token(ANA, "human", [ANA], ["notes:read"]);
+    for (let i = 0; i < 6; i++) {
+      const abort = new AbortController();
+      const response = await w.worker.fetch(new Request(`${base}/chat`, { method: "POST", body: JSON.stringify({ message: "go" }), signal: abort.signal, headers: { authorization: `Bearer ${token}` } }));
+      expect(response.status, `turn ${i}`).toBe(200);
+      abort.abort();
+    }
+  });
+
   test("a principal may run only a few turns at once", async () => {
     const hang = () => ({ stream: () => new Promise<never>(() => undefined), name: "hang", model: "hang-1" }) as never;
     const w = world(hang);
@@ -247,6 +261,31 @@ describe("approvals", () => {
     expect((await decide(w, request.id, "approve", ana, { digest: request.digest })).status).toBe(200);
     expect((await stream.all()).at(-1)?.data.reason).toBe("end_turn");
     expect(w.remove).toHaveBeenCalledOnce();
+  });
+
+  test("an agent cannot decide through an agent it made, or through the agent that made it", async () => {
+    const { w, ana, request, stream } = await pendingRun();
+    // agent:a asked for the turn. Its child holds every scope the approval needs.
+    const child = await w.token("agent:b", "agent_of_agent", [ANA, "agent:a", "agent:b"], ["notes:write", "assistant:admin"]);
+    expect((await decide(w, request.id, "approve", child, { digest: request.digest })).status).toBe(403);
+    expect((await decide(w, request.id, "deny", child)).status).toBe(403);
+    expect(w.remove).not.toHaveBeenCalled();
+    await decide(w, request.id, "deny", ana);
+    await stream.all();
+
+    // Now the child asks, and its parent holds every scope.
+    const second = world(deleteTurns);
+    const parent = await second.token("agent:a", "agent_of_human", [ANA, "agent:a"], ["notes:write", "assistant:admin"]);
+    const kid = await second.token("agent:b", "agent_of_agent", [ANA, "agent:a", "agent:b"], ["notes:write", "assistant:admin"]);
+    const person = await second.token(ANA, "human", [ANA], ["notes:write"]);
+    const run2 = events(await second.post("/chat", kid, { message: "delete n1" }));
+    const pending2 = (await run2.until("approval_request")).data.request as { id: string; digest: string };
+    expect((await decide(second, pending2.id, "approve", parent, { digest: pending2.digest })).status).toBe(403);
+    expect(second.remove).not.toHaveBeenCalled();
+    // The person above both may decide.
+    expect((await decide(second, pending2.id, "approve", person, { digest: pending2.digest })).status).toBe(200);
+    await run2.all();
+    expect(second.remove).toHaveBeenCalledOnce();
   });
 
   test("another agent that holds the approver scope may decide, one without it may not", async () => {
