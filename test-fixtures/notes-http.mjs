@@ -3,12 +3,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createNotesServer } from "./notes-server.mjs";
 
 /** Serves the notes MCP server over HTTP on a free local port. Counters show which tools were reached. */
-export async function serveNotes() {
+export async function serveNotes(options = {}) {
   const counters = {};
   const headers = [];
   const server = createServer(async (req, res) => {
     headers.push(req.headers);
-    const mcp = createNotesServer(counters);
+    const mcp = createNotesServer(counters, options);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       void transport.close();

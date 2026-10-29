@@ -379,6 +379,19 @@ describe("hardening", () => {
     expect(result.stderr).not.toMatch(/[\u00ad\u2060]|[\u{e0000}-\u{e007f}]/u);
   });
 
+  test("prints at most 20 skipped tools, then says how many were left out", async () => {
+    const many = await serveNotes({ badNames: 25 });
+    try {
+      const result = await cli(["chat", "--tools", many.url, ...readOnly, "--provider", "scripted", "--script", script([{ text: "ok" }]), "go"]);
+      expect(result.code).toBe(0);
+      expect(result.stderr.split("\n").filter((line) => line.startsWith("skipped tool "))).toHaveLength(20);
+      // The 25 bad names and the 5 bad tools of the notes server make 30 skipped, so 10 are left out.
+      expect(result.stderr).toContain("skipped 10 more tools");
+    } finally {
+      await many.close();
+    }
+  });
+
   test("removes control characters from the error of a tool server", async () => {
     const evil = createServer((req, res) => {
       req.resume();
