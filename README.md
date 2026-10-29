@@ -151,6 +151,22 @@ agentic-assistant mcp --tools https://notes.example.eu/mcp --scope notes:read --
 
 Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat`, with one argument, `message`. Each call starts a new conversation. The reply is JSON with `machineMade: true`, the answer, the stop reason, and the tool calls. A run that stops on a cap is an error result. The caps (`--max-turns`, `--max-cost`) apply to one call, and the server has no total limit, so set a limit in the client that calls it. The server stops when the client closes its input. A call that is still running is cancelled and dropped: the client gets no reply for it. The tool servers are closed. The server cannot ask a person, so a risky call runs only when you started the server with a matching `--approve-call`.
 
+### Tools and approvals from the CLI and MCP
+
+A running assistant API holds the calls that wait for a person. Four CLI commands reach it. The token comes from an environment variable, never from an argument.
+
+```sh
+export ASSISTANT_TOKEN=...
+agentic-assistant tools     --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
+agentic-assistant approvals --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
+agentic-assistant approve <id> --digest <digest> --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
+agentic-assistant deny <id> --reason "not now" --api https://assistant.example.eu --api-token-env ASSISTANT_TOKEN
+```
+
+`approvals` prints the id and the digest of each call. `approve` needs the digest, so you approve the exact call you read. A wrong digest is a conflict and the call does not run. A denial is final. Add `--json` for JSON. Exit codes: 0 done, 1 the API refused or failed, 2 bad usage.
+
+Start the MCP server with `--api` and `--api-token-env` and it also offers `assistant_tools`, `assistant_approvals`, `assistant_approve`, and `assistant_deny`. They act with the token you gave. An agent token needs the `assistant:admin` scope to decide. Do not give the server a token that lets the assistant approve its own call.
+
 ## Run it as a hosted HTTP API
 
 ```ts

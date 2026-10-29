@@ -44,6 +44,8 @@ agentic-assistant chat --tools <mcp-url> --scope notes:read --tool-scope notes:r
 
 Set the key in the environment. Approve one exact risky call with `--approve-call`. Read the exit code: 0 normal, 1 stopped or failed, 2 usage.
 
+To list tools and decide on pending calls on a running API, use `agentic-assistant tools|approvals|approve <id> --digest <d>|deny <id> --api <url> --api-token-env <NAME>`. Never approve a call you proposed. Wait for the person.
+
 ## Show a panel
 
 ```tsx
