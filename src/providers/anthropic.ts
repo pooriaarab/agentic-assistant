@@ -92,7 +92,8 @@ export class AnthropicProvider implements ModelProvider {
     }
     this.client = new Anthropic({
       apiKey,
-      ...(options.baseUrl !== undefined ? { baseURL: checkBaseUrl(options.baseUrl).text } : {}),
+      // Always set, so ANTHROPIC_BASE_URL in the environment cannot redirect the key.
+      baseURL: options.baseUrl !== undefined ? checkBaseUrl(options.baseUrl).text : "https://api.anthropic.com",
     });
   }
 

@@ -19,7 +19,7 @@ export interface OpenAICompatibleOptions {
   apiKey?: string;
   pricing?: Pricing;
   /** Most bytes to read from one response, comments and keep-alive lines included. Default 4,000,000. */
-  maxResponseChars?: number;
+  maxResponseBytes?: number;
   /** Provider name in events and errors. Default "openai-compatible". */
   name?: string;
 }
@@ -75,16 +75,16 @@ export class OpenAICompatibleProvider implements ModelProvider {
   readonly pricing?: Pricing;
   private readonly baseUrl: string;
   private readonly apiKey?: string;
-  private readonly maxResponseChars: number;
+  private readonly maxResponseBytes: number;
 
   constructor(options: OpenAICompatibleOptions) {
     this.name = options.name ?? "openai-compatible";
     this.model = options.model;
     this.pricing = options.pricing;
     this.apiKey = options.apiKey;
-    const limit = options.maxResponseChars ?? 4_000_000;
-    if (!Number.isInteger(limit) || limit <= 0) throw new ProviderError("maxResponseChars must be a positive integer");
-    this.maxResponseChars = limit;
+    const limit = options.maxResponseBytes ?? 4_000_000;
+    if (!Number.isInteger(limit) || limit <= 0) throw new ProviderError("maxResponseBytes must be a positive integer");
+    this.maxResponseBytes = limit;
     const { url, text } = checkBaseUrl(options.baseUrl);
     this.baseUrl = text;
     if (options.apiKey === "" || (options.apiKey === undefined && !isLoopback(url))) {
@@ -122,7 +122,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
     let text = "";
     let received = 0;
-    const limit = this.maxResponseChars;
+    const limit = this.maxResponseBytes;
     const calls = new Map<number, ToolCallAccumulator>();
     let finish: string | undefined;
     let usage: { prompt_tokens?: unknown; completion_tokens?: unknown } | undefined;
