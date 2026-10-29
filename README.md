@@ -150,6 +150,31 @@ agentic-assistant mcp --tools https://notes.example.eu/mcp --scope notes:read --
 
 Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat`, with one argument, `message`. Each call starts a new conversation. The reply is JSON with `machineMade: true`, the answer, the stop reason, and the tool calls. A run that stops on a cap is an error result. The caps (`--max-turns`, `--max-cost`) apply to one call, and the server has no total limit, so set a limit in the client that calls it. The server stops when the client closes its input. A call that is still running is cancelled and dropped: the client gets no reply for it. The tool servers are closed. The server cannot ask a person, so a risky call runs only when you started the server with a matching `--approve-call`.
 
+## Run it as a hosted HTTP API
+
+```ts
+// src/index.ts of your Worker
+import { createWorker } from "agentic-assistant/worker";
+import { createStoreAuth } from "agentic-identity";
+
+export default {
+  fetch: (request: Request, env: Env) =>
+    createWorker({ auth: createStoreAuth(store(env)), registry, provider: () => new AnthropicProvider({ baseUrl: env.MODEL_URL }) }).fetch(request, env),
+};
+```
+
+Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key resolves to an `agentic-identity` principal. A person, an agent, and a token that acts for a user all work. A missing, bad, or odd credential is a 401.
+
+| Route | What it does |
+|---|---|
+| `GET /tools` | The tools inside the caller's scopes: name, description, scope, risk, input schema. |
+| `POST /chat` `{"message":"..."}` | One new conversation. The answer is a stream of server-sent events (`event: <type>`, `data: <json>`), the same events as `runAssistant`, ending with `done`. |
+| `GET /approvals` | Pending risky calls of the same owner, with the digest and `canDecide`. |
+| `POST /approvals/:id/approve` `{"digest":"..."}` | Approve the exact call. A wrong digest is a 409. |
+| `POST /approvals/:id/deny` `{"reason":"..."}` | Refuse the call. |
+
+The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. If a client hangs up, the run stops and its pending calls go. If the key is revoked during a run, the run stops before its next tool call.
+
 ## Features
 
 - **Model port.** `ModelProvider` has two adapters. `AnthropicProvider` needs a `baseUrl`, or `useDefaultEndpoint: true` to call `api.anthropic.com`, which is a US-hosted endpoint. There is no silent default. `OpenAICompatibleProvider` calls any server that speaks the chat-completions stream, so you can use an EU-hosted model. Both adapters need an `https` URL, except for `localhost`. If you pass your own `client` to `AnthropicProvider`, you own its endpoint. The OpenAI-compatible adapter needs an API key for any other host and cuts a response at a size limit.
@@ -168,7 +193,8 @@ Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat
 
 ## Limits
 
-- There is no hosted HTTP API. The Worker only answers `/health`.
+- The hosted API keeps pending approvals in the memory of one Worker instance. A decision must reach the instance that holds the chat stream. Run it on one instance or behind sticky routing until a shared queue exists. It has no per-IP limit, only a cap of four chat turns at once per principal.
+- The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The sample Worker in `wrangler.jsonc` answers `/health` only.
 - The CLI reads one message, or a short conversation on a terminal. It does not keep a conversation between runs.
 - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
 - The panel shows plain text, not Markdown.
