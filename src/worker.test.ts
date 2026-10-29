@@ -54,6 +54,8 @@ describe("demo worker", () => {
     expect((await call("/api/v1/tools", { headers: bearer }, { ASSISTANT_TOKENS: "not json" })).status).toBe(503);
     await expect(createStaticTokenAuth({ [TOKEN]: { id: "", scopes: [] } })).rejects.toThrow();
     await expect(createStaticTokenAuth({ [`${TOKEN} x`]: { id: "a", scopes: [] } })).rejects.toThrow(/white space/);
+    await expect(createStaticTokenAuth({ [`${TOKEN}.x`]: { id: "a", scopes: [] } })).rejects.toThrow(/A-Z a-z 0-9/);
+    await expect(createStaticTokenAuth({ ["a".repeat(513)]: { id: "a", scopes: [] } })).rejects.toThrow(/512/);
     await expect(createStaticTokenAuth({ [TOKEN]: { id: "a", scopes: ["not a scope"] } })).rejects.toThrow();
     // A kind in the entry would be dropped and the caller would sign in as a person.
     await expect(createStaticTokenAuth({ [TOKEN]: { id: "bot", kind: "agent", scopes: [] } as never })).rejects.toThrow(/only an id and scopes/);

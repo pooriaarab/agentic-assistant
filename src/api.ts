@@ -1,4 +1,5 @@
-import type { Auth, PrincipalContext } from "agentic-identity";
+import { PRINCIPAL_KINDS, type Auth, type PrincipalContext } from "agentic-identity";
+import { requirePrincipal } from "agentic-identity/http";
 import type { ApprovalDecision, ApprovalGate, ApprovalRequest } from "./approvals.js";
 import { runAssistant, type AssistantEvent, type RunLimits } from "./loop.js";
 import { createPrincipal } from "./principal.js";
@@ -15,6 +16,8 @@ export interface AssistantApiOptions {
   registry: ToolRegistry;
   system?: string;
   limits?: RunLimits;
+  /** Origins (such as `https://app.example.org`) that may send a write signed in with a session cookie. A write with a cookie from any other origin is a 403. A Bearer key needs no origin. */
+  origins?: readonly string[];
   /** Most chat turns one principal may run at once. Default 4. */
   maxConcurrentRuns?: number;
 }
@@ -23,9 +26,16 @@ const MAX_BODY_BYTES = 65_536;
 const MAX_MESSAGE_CHARS = 10_000;
 const MAX_REASON_CHARS = 500;
 const DEFAULT_MAX_CONCURRENT_RUNS = 4;
-const KINDS = ["human", "agent_of_human", "agent_of_agent", "agent", "user_token"];
 /** An agent needs this scope before it may decide on a tool call. A person needs no extra scope. */
 export const APPROVER_SCOPE = "assistant:admin";
+
+/** Reads the credential with the identity middleware. A caller, or the Response to send back. */
+async function callerOf(request: Request, auth: Auth, origins?: readonly string[]): Promise<Caller | Response> {
+  const found = await requirePrincipal(request, auth, { origins });
+  // A 401 keeps this API's own text. A 403 or a 503 keeps the identity body.
+  if (found instanceof Response) return found.status === 401 ? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" }) : found;
+  return toCaller(found) ?? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" });
+}
 
 interface Caller {
   id: string;
@@ -52,8 +62,10 @@ const fail = (status: number, error: string, headers: Record<string, string> = {
 function toCaller(context: PrincipalContext | null): Caller | undefined {
   if (typeof context !== "object" || context === null) return undefined;
   const { principalId, kind, chain, scopes } = context;
-  if (typeof principalId !== "string" || principalId === "" || !KINDS.includes(kind)) return undefined;
-  if (!Array.isArray(chain) || chain.length === 0 || chain[chain.length - 1]?.id !== principalId) return undefined;
+  if (typeof principalId !== "string" || principalId === "" || !Array.isArray(chain) || chain.length === 0) return undefined;
+  // Only the kind comes from identity. `parsePrincipal` also limits ids to `A-Za-z0-9._-`, and hosts here use ids such as `human:ana`.
+  if (!PRINCIPAL_KINDS.includes(kind)) return undefined;
+  if (chain[chain.length - 1]?.id !== principalId) return undefined;
   // The kind must agree with the chain: the last step is the caller, and a person has no parent.
   if (chain[chain.length - 1]?.kind !== kind || (kind === "human" && chain.length !== 1)) return undefined;
   const ids = chain.map((step) => step?.id);
@@ -181,8 +193,8 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
           scopes: caller.scopes,
           // Each check asks the Auth again. A key revoked during a run, or one with other scopes, stops it.
           isRevoked: async () => {
-            const now = toCaller(await options.auth.authenticate(request));
-            return now?.id !== caller.id || [...now.scopes].sort().join(" ") !== [...caller.scopes].sort().join(" ");
+            const now = await callerOf(request, options.auth, options.origins);
+            return now instanceof Response || now.id !== caller.id || [...now.scopes].sort().join(" ") !== [...caller.scopes].sort().join(" ");
           },
         }),
         approvals: gateFor(caller),
@@ -254,13 +266,8 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
       if (request.method !== allowed) return fail(405, "method not allowed", { allow: allowed });
       if (route !== "approvals" && id !== undefined) return fail(404, "not found");
 
-      let caller: Caller | undefined;
-      try {
-        caller = toCaller(await options.auth.authenticate(request));
-      } catch {
-        caller = undefined;
-      }
-      if (caller === undefined) return fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" });
+      const caller = await callerOf(request, options.auth, options.origins);
+      if (caller instanceof Response) return caller;
 
       if (route === "tools") {
         const tools = options.registry

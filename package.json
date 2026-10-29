@@ -1,6 +1,6 @@
 {
   "name": "agentic-assistant",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An AI assistant that acts inside your apps with the user's own permissions.",
   "keywords": [
     "assistant",
@@ -74,7 +74,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "agentic-identity": "^0.4.0",
+    "agentic-identity": "^0.6.0",
     "ajv": "^8.20.0"
   },
   "devDependencies": {

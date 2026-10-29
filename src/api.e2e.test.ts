@@ -109,12 +109,31 @@ describe("sign-in", () => {
     expect(w.providers).toHaveLength(0);
   });
 
-  test("an Auth that throws, or returns a context of the wrong shape, is a 401", async () => {
+  test("a Bearer key outside the identity token format is a 401 with the API's own body", async () => {
+    const registry = new ToolRegistry();
+    const worker = createWorker({ auth: { authenticate: async () => null } as never, registry, provider: () => new ScriptedProvider([]) });
+    const response = await worker.fetch(new Request(`${base}/tools`, { headers: { authorization: "Bearer a.b+c" } }));
+    expect([response.status, response.headers.get("www-authenticate"), await response.json()]).toEqual([401, "Bearer", { error: "sign in with a valid key" }]);
+  });
+
+  test("a cookie write needs an origin from the host, and a read does not", async () => {
+    const context = { principalId: "human:ana", kind: "human", chain: [{ id: "human:ana", kind: "human" }], scopes: ["notes:read"] };
+    const make = (origins?: string[]) =>
+      createWorker({ auth: { authenticate: async () => context } as never, registry: new ToolRegistry(), provider: () => new ScriptedProvider([]), origins });
+    const write = (origin?: string) =>
+      new Request(`${base}/chat`, { method: "POST", body: JSON.stringify({ message: "hi" }), headers: { "content-type": "application/json", ...(origin ? { origin } : {}) } });
+    expect((await make().fetch(write("https://app.test"))).status).toBe(403);
+    expect((await make(["https://app.test"]).fetch(write("https://evil.test"))).status).toBe(403);
+    expect((await make(["https://app.test"]).fetch(write("https://app.test"))).status).toBe(200);
+    expect((await make().fetch(new Request(`${base}/tools`))).status).toBe(200);
+  });
+
+  test("an Auth that throws is a 503, and a context of the wrong shape is a 401", async () => {
     const registry = new ToolRegistry();
     const make = (authenticate: () => Promise<unknown>) =>
       createWorker({ auth: { authenticate } as never, registry, provider: () => new ScriptedProvider([]) });
     const request = () => new Request(`${base}/tools`);
-    expect((await make(async () => Promise.reject(new Error("db down"))).fetch(request())).status).toBe(401);
+    expect((await make(async () => Promise.reject(new Error("db down"))).fetch(request())).status).toBe(503);
     for (const context of [
       { principalId: "a", kind: "wizard", chain: [{ id: "a", kind: "human" }], scopes: [] },
       { principalId: "a", kind: "human", chain: [], scopes: [] },
