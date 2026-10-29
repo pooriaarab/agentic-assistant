@@ -117,6 +117,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!response.ok || response.body === null) {
+      await response.body?.cancel().catch(() => undefined);
       throw new ProviderError(`${this.name} request failed with status ${response.status}`);
     }
 
@@ -141,21 +142,25 @@ export class OpenAICompatibleProvider implements ModelProvider {
       } catch {
         throw new ProviderError("provider sent a stream chunk that is not JSON");
       }
+      if (typeof chunk !== "object" || chunk === null) return;
       if (chunk.usage) usage = chunk.usage;
-      const choice = chunk.choices?.[0];
-      if (!choice) return;
+      const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
+      if (typeof choice !== "object" || choice === null) return;
       if (choice.finish_reason) finish = choice.finish_reason;
       const delta = choice.delta;
       if (typeof delta?.content === "string" && delta.content.length > 0) {
         text += delta.content;
         yield { type: "text_delta", text: delta.content };
       }
-      for (const part of delta?.tool_calls ?? []) {
-        const call = calls.get(part.index) ?? { id: "", name: "", args: "" };
+      for (const part of Array.isArray(delta?.tool_calls) ? delta.tool_calls : []) {
+        if (typeof part !== "object" || part === null) continue;
+        // Some servers send no index. A part with an id then starts a new call, and one without continues the last.
+        const index = Number.isInteger(part.index) ? part.index : part.id ? calls.size : Math.max(calls.size - 1, 0);
+        const call = calls.get(index) ?? { id: "", name: "", args: "" };
         if (part.id) call.id = part.id;
         if (part.function?.name) call.name += part.function.name;
         if (part.function?.arguments) call.args += part.function.arguments;
-        calls.set(part.index, call);
+        calls.set(index, call);
       }
     };
 
