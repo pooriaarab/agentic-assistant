@@ -189,7 +189,7 @@ The assistant holds the caller's scopes and no more. A chat turn waits at a risk
 
 The package marks what the assistant makes as AI-generated. This follows the idea of EU AI Act Article 50.
 
-Each tool result and each finished run carries a `provenance` record: `generator: "ai"`, the model, the provider, the time, the assistant id, the person it acts for, and the approver when a person approved the call. After a fallback, the record names the model that answered. A denied call has no record, because nothing ran.
+Each tool result and each finished run carries a `provenance` record: `generator: "ai"`, the model, the provider, the time, the assistant id, the person it acts for, and the tool, its risk, and the approver when someone approved the call. The approver has a `kind`: `human`, `agent`, `host` (a rule you set), or `unknown`. Say "a person approved" only for `human`. After a fallback, the record names the model that answered. A denied call has no record, because nothing ran.
 
 ```ts
 import { provenanceLabel, provenanceMarker } from "agentic-assistant";

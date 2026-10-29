@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { provenanceLabel } from "./provenance.js";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
@@ -7,6 +6,7 @@ import { parseArgs } from "node:util";
 import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
 import { ConfigError, buildSetup, readTextFile, runChat, type ChatConfig, type ChatIo, type Setup } from "./chat.js";
 import type { AssistantEvent, RunLimits } from "./loop.js";
+import { provenanceLabel } from "./provenance.js";
 import { printable } from "./text.js";
 import type { Message, Pricing } from "./types.js";
 import { VERSION } from "./version.js";

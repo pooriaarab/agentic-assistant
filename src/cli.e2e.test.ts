@@ -514,7 +514,7 @@ describe("MCP server process", () => {
     expect(lines.length).toBeGreaterThanOrEqual(2);
     for (const line of lines) expect(JSON.parse(line)).toMatchObject({ jsonrpc: "2.0" });
     const reply = JSON.parse(lines.find((line) => line.includes('"id":2')) as string);
-    expect(JSON.parse(reply.result.content[0].text).toolCalls).toMatchObject([{ name: "notes_write", isError: false, provenance: { generator: "ai", approvedBy: ["cli:pre-approved"] } }]);
+    expect(JSON.parse(reply.result.content[0].text).toolCalls).toMatchObject([{ name: "notes_write", isError: false, provenance: { generator: "ai", approvedBy: [{ id: "cli:pre-approved", kind: "host" }] } }]);
     expect(notes.counters.notes_write).toBe(before + 1);
     server.child.stdin.end();
     const code = await Promise.race([server.exited, new Promise<string>((resolve) => setTimeout(() => resolve("still running"), 5000))]);

@@ -1,4 +1,5 @@
 import {
+  APPROVER_KINDS,
   deepFreeze,
   digestCall,
   newApprovalId,
@@ -8,7 +9,7 @@ import {
   type ApprovalRequest,
 } from "./approvals.js";
 import { actorOf, assertPrincipal, type Actor, type AssistantPrincipal } from "./principal.js";
-import { createProvenance, type Provenance } from "./provenance.js";
+import { createProvenance, type Approver, type Provenance } from "./provenance.js";
 import { cutText } from "./text.js";
 import { hasScope } from "./scopes.js";
 import { toToolSpec, type ToolRegistry } from "./tools.js";
@@ -208,10 +209,10 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
   const system = options.system === undefined ? DATA_NOTICE : `${options.system}\n\n${DATA_NOTICE}`;
   const totals: RunTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let answered: AnsweredBy | undefined;
-  const stamp = (approvedBy?: string[]): Provenance | undefined =>
+  const stamp = (extra: { approvedBy?: Approver[]; tool?: string; risk?: Provenance["risk"] } = {}): Provenance | undefined =>
     answered === undefined
       ? undefined
-      : createProvenance({ model: answered.model, provider: answered.provider, createdAt: now(), actor: principal.id, onBehalfOf: principal.parentId, approvedBy });
+      : createProvenance({ model: answered.model, provider: answered.provider, createdAt: Number.isFinite(now()) ? now() : Date.now(), actor: principal.id, onBehalfOf: principal.parentId, ...extra });
   const finish = (reason: DoneReason, error?: string): AssistantEvent => ({
     type: "done",
     reason,
@@ -359,7 +360,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         untrusted: outcome.untrusted,
         detail: outcome.detail,
         actor,
-        ...(outcome.ran ? { provenance: stamp(outcome.approvedBy) } : {}),
+        ...(outcome.ran ? { provenance: stamp({ approvedBy: outcome.approvedBy, tool: call.name, risk: outcome.risk }) } : {}),
       };
     }
     messages.push({ role: "user", content: results });
@@ -386,7 +387,8 @@ interface Outcome {
   /** True when the tool handler ran. */
   ran?: true;
   /** The person who approved the call, when one did. */
-  approvedBy?: string[];
+  approvedBy?: Approver[];
+  risk?: Provenance["risk"];
   /** Set when the run must stop, and this call did not run. */
   stop?: "aborted" | "principal_inactive";
 }
@@ -447,7 +449,8 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
     return refuse("tool input is nested too deeply", "invalid_input");
   }
 
-  let approver: string | undefined;
+  let approver: Approver | undefined;
+  let approverKind: Approver["kind"] = "unknown";
   if (tool.risk !== "safe") {
     if (ctx.gate === undefined) return refuse(`denied: "${tool.name}" needs a person's approval, and none is set up`, "approval");
     const request: ApprovalRequest = deepFreeze({
@@ -471,6 +474,8 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
         const decision = await waiting.promise;
         why = refuseDecision(decision, request, principal.id);
         if (typeof decision.decidedBy === "string") decidedBy = decision.decidedBy;
+        const kind = (decision as { approverKind?: unknown }).approverKind;
+        approverKind = APPROVER_KINDS.find((k) => k === kind) ?? "unknown";
         if (decision.approved === false) {
           declined = true;
           if (typeof decision.reason === "string") declineReason = decision.reason;
@@ -495,7 +500,7 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       const detail = (declineReason === undefined ? why : `${why}: ${declineReason}`).slice(0, MAX_APPROVER_TEXT);
       return refuse("denied: a person did not approve this action", "approval", detail);
     }
-    approver = decidedBy?.slice(0, MAX_APPROVER_TEXT);
+    approver = decidedBy === undefined ? undefined : { id: decidedBy.slice(0, MAX_APPROVER_TEXT), kind: approverKind };
     // The person may have taken a while. The principal must still be valid.
     if (!(await principalActive(principal, ctx.now()))) return { ...refuse("", "approval"), stop: "principal_inactive" };
   }
@@ -511,9 +516,10 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       untrusted: true,
       ran: true,
       approvedBy,
+      risk: tool.risk,
     };
   } catch (error) {
     // A tool that threw may have changed something before it failed, so the failure is marked too.
-    return { content: "tool failed", modelContent: "tool failed", isError: true, ran: true, approvedBy, detail: error instanceof Error ? error.message : String(error) };
+    return { content: "tool failed", modelContent: "tool failed", isError: true, ran: true, approvedBy, risk: tool.risk, detail: error instanceof Error ? error.message : String(error) };
   }
 }

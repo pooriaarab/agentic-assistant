@@ -8,6 +8,7 @@ import { ToolRegistry, createPrincipal, runAssistant, type AssistantEvent } from
 import { createAssistantMcpServer } from "./mcp-server.js";
 import { TRAINED_ALGORITHMIC_MEDIA, createProvenance, provenanceLabel, provenanceMarker } from "./provenance.js";
 import { ScriptedProvider, type ScriptedTurn } from "./testing.js";
+import type { ApproverKind } from "./approvals.js";
 import type { ModelEvent, ModelProvider } from "./types.js";
 import { createWorker } from "./worker.js";
 
@@ -27,14 +28,14 @@ const tools = () =>
     .register({ name: "wipe", description: "w", inputSchema: { type: "object" }, scope: "notes:write", risk: "risky", handler: async () => "wiped" })
     .register({ name: "boom", description: "b", inputSchema: { type: "object" }, scope: "notes:read", risk: "safe", handler: async () => { throw new Error("x"); } });
 
-async function run(turns: ScriptedTurn[], gate?: (id: string) => "approve" | "deny", provider: ModelProvider = new ScriptedProvider(turns)) {
+async function run(turns: ScriptedTurn[], gate?: (id: string) => "approve" | "deny", provider: ModelProvider = new ScriptedProvider(turns), kind?: ApproverKind) {
   const approvals = new QueueApprovalGate();
   const out: AssistantEvent[] = [];
   const principal = createPrincipal({ id: "assistant:ana", kind: "agent_of_human", parentId: "ana", scopes: ["notes:read", "notes:write"] });
   for await (const event of runAssistant({ provider, registry: tools(), principal, approvals: gate ? approvals : undefined, now: () => NOW, messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] })) {
     out.push(event);
     if (event.type === "approval_request") {
-      if (gate?.(event.request.id) === "approve") approvals.approve(event.request.id, "ana");
+      if (gate?.(event.request.id) === "approve") approvals.approve(event.request.id, "ana", kind);
       else approvals.reject(event.request.id, "ana", "no");
     }
   }
@@ -47,14 +48,18 @@ describe("provenance in the run", () => {
   test("the answer and a safe tool result carry a record with no approver", async () => {
     const events = await run([{ toolCalls: [{ name: "read", input: {} }] }, { text: "ok" }]);
     const expected = { generator: "ai", model: "scripted-1", provider: "scripted", createdAt: "2026-10-29T10:00:00.000Z", actor: "assistant:ana", onBehalfOf: "ana" };
-    expect(results(events)[0]!.provenance).toEqual(expected);
+    expect(results(events)[0]!.provenance).toEqual({ ...expected, tool: "read", risk: "safe" });
     expect(done(events).provenance).toEqual(expected);
   });
 
   test("an approved edit names the approver, and a refused one has no record", async () => {
     const turns = [{ toolCalls: [{ name: "wipe", input: {} }] }, { text: "ok" }];
-    const approved = await run(turns, () => "approve");
-    expect(results(approved)[0]!.provenance?.approvedBy).toEqual(["ana"]);
+    const approved = await run(turns, () => "approve", undefined, "human");
+    expect(results(approved)[0]!.provenance).toMatchObject({ tool: "wipe", risk: "risky", approvedBy: [{ id: "ana", kind: "human" }] });
+    expect(results((await run(turns, () => "approve", undefined, "agent")))[0]!.provenance?.approvedBy).toEqual([{ id: "ana", kind: "agent" }]);
+    // A gate that does not say who approved, or says something else, is not taken for a person.
+    expect(results((await run(turns, () => "approve")))[0]!.provenance?.approvedBy).toEqual([{ id: "ana", kind: "unknown" }]);
+    expect(results((await run(turns, () => "approve", undefined, "root" as never)))[0]!.provenance?.approvedBy).toEqual([{ id: "ana", kind: "unknown" }]);
     const refused = await run(turns, () => "deny");
     expect(results(refused)[0]).toMatchObject({ denied: "approval" });
     expect(results(refused)[0]!.provenance).toBeUndefined();
@@ -88,7 +93,7 @@ describe("provenance in the run", () => {
 });
 
 describe("provenance helper", () => {
-  const record = createProvenance({ model: "m-1", provider: "acme", createdAt: NOW, actor: "assistant:ana", onBehalfOf: "ana", approvedBy: ["bob", "bob", "ana"] });
+  const record = createProvenance({ model: "m-1", provider: "acme", createdAt: NOW, actor: "assistant:ana", onBehalfOf: "ana", approvedBy: [{ id: "bob", kind: "human" }, { id: "bob", kind: "human" }, { id: "ops", kind: "agent" }, { id: "cli:pre-approved", kind: "host" }, { id: "x", kind: "unknown" }] });
 
   test("the marker uses the IPTC trainedAlgorithmicMedia source type", () => {
     const marker = provenanceMarker(record) as Record<string, any>;
@@ -96,11 +101,13 @@ describe("provenance helper", () => {
     expect(marker.digitalSourceType).toBe(TRAINED_ALGORITHMIC_MEDIA);
     expect(marker.digitalSourceType).toMatch(/trainedAlgorithmicMedia$/);
     expect(marker.dateCreated).toBe("2026-10-29T10:00:00.000Z");
-    expect(marker.additionalProperty.filter((p: any) => p.name === "approvedBy").map((p: any) => p.value)).toEqual(["ana", "bob"]);
+    expect(marker.additionalProperty.filter((p: any) => p.name.startsWith("approvedBy")).map((p: any) => `${p.name}=${p.value}`)).toEqual(
+      ["approvedBy:human=bob", "approvedBy:host=cli:pre-approved", "approvedBy:agent=ops", "approvedBy:unknown=x"].sort((a, b) => a.split("=")[1]!.localeCompare(b.split("=")[1]!)),
+    );
   });
 
   test("the label is short and says AI-generated", () => {
-    expect(provenanceLabel(record)).toBe("AI-generated by m-1 (acme), approved by ana, bob");
+    expect(provenanceLabel(record)).toBe("AI-generated by m-1 (acme), approved by bob, cli:pre-approved (host rule), ops (agent), x (unverified)");
   });
 
   test("the label drops control and bidi characters and cuts long names", () => {
@@ -108,6 +115,27 @@ describe("provenance helper", () => {
     expect(label).not.toMatch(/[\u0000-\u001f\u202e]/);
     expect(label.length).toBeLessThan(140);
     expect(label.startsWith("AI-generated by ")).toBe(true);
+  });
+
+  test("a label hides the Arabic letter mark and word joiners", () => {
+    expect(provenanceLabel({ ...record, model: "a\u061cb\u2060c\u00add", approvedBy: undefined })).toBe("AI-generated by a b c d (acme)");
+  });
+
+  test("an empty or non-string model, provider, or actor is an error", () => {
+    for (const bad of ["", undefined, 7]) {
+      expect(() => createProvenance({ model: bad as never, provider: "p", createdAt: NOW, actor: "a", onBehalfOf: "b" })).toThrow(TypeError);
+      expect(() => createProvenance({ model: "m", provider: bad as never, createdAt: NOW, actor: "a", onBehalfOf: "b" })).toThrow(TypeError);
+    }
+  });
+
+  test("a clock that is not a number gives a record the real time", async () => {
+    const principal = createPrincipal({ id: "a", kind: "agent_of_human", parentId: "ana", scopes: ["notes:read"] });
+    const out: AssistantEvent[] = [];
+    for await (const event of runAssistant({ provider: new ScriptedProvider([{ text: "hi" }]), registry: tools(), principal, now: () => Number.NaN, messages: [] })) out.push(event);
+    const last = done(out);
+    // The record falls back to the real time, so the date is never wrong or missing.
+    expect(last.reason).toBe("end_turn");
+    expect(Math.abs(Date.parse(last.provenance!.createdAt) - Date.now())).toBeLessThan(60_000);
   });
 
   test("a time that is not a number is an error", () => {

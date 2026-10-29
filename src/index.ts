@@ -1,10 +1,10 @@
 export { VERSION } from "./version.js";
 export { DATA_NOTICE, runAssistant } from "./loop.js";
 export { QueueApprovalGate, TOOL_RISKS, canonicalJson, digestCall } from "./approvals.js";
-export type { ApprovalDecision, ApprovalGate, ApprovalRequest, ToolRisk } from "./approvals.js";
+export type { ApprovalDecision, ApprovalGate, ApprovalRequest, ApproverKind, ToolRisk } from "./approvals.js";
 export type { AssistantEvent, DeniedReason, DoneReason, RunLimits, RunOptions, RunTotals } from "./loop.js";
 export { TRAINED_ALGORITHMIC_MEDIA, createProvenance, provenanceLabel, provenanceMarker } from "./provenance.js";
-export type { Provenance, ProvenanceInput } from "./provenance.js";
+export type { Approver, Provenance, ProvenanceInput } from "./provenance.js";
 export { createPrincipal, assertPrincipal, actorOf, PrincipalError } from "./principal.js";
 export type { Actor, AssistantPrincipal, PrincipalInput } from "./principal.js";
 export { ACTIONS, hasScope, parseScope, scopeCovers } from "./scopes.js";
