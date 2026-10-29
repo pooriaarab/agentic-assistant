@@ -188,6 +188,32 @@ Every route is under `/api/v1` and needs `Authorization: Bearer <key>`. The key 
 
 The assistant holds the caller's scopes and no more. A chat turn waits at a risky call until another principal decides. The stream stays open for that time. A principal that asked for the turn never decides on its own proposal: an agent gets a 403 for both approve and deny. The same holds for an agent it made and for the agent that made it. A person who asks may decide, because the assistant proposed the call. Another agent may decide only when it holds `assistant:admin` and the scope of the tool. A principal with another owner sees a 404. The list hides a call whose tool the caller has no scope for. If a client hangs up, the run stops and its pending calls go. If the key is revoked or its scopes change during a run, the run stops before its next tool call.
 
+## Use the HTTP client
+
+`agentic-assistant/client` is a typed client for the hosted API routes. It uses only `fetch`, so it runs in browsers, Workers, and Node.
+
+```ts
+import { createClient, AssistantApiError } from "agentic-assistant/client";
+
+const assistant = createClient({ baseUrl: "https://assistant.example.com", token });
+const tools = await assistant.tools();
+for await (const event of assistant.chat("Delete note n1")) {
+  if (event.type === "text_delta") process.stdout.write(event.text);
+}
+try {
+  const [pending] = await assistant.approvals();
+  if (pending?.canDecide) await assistant.approve(pending.id, pending.digest);
+} catch (error) {
+  if (error instanceof AssistantApiError) console.error(error.code, error.status);
+}
+```
+
+- The methods match the routes: `health`, `tools`, `chat`, `approvals`, `approve`, `deny`. Each takes an optional `{ signal }` as its last argument.
+- `chat` is an async generator of the same events as `runAssistant`, ending with `done`. A run that fails on the server ends with an `error` event. Stop reading to stop the run. The stream stays open while a risky call waits, so decide from another call.
+- `baseUrl` is the Worker URL, `http` or `https`, with no query, hash, or credentials. Pass `fetch` to use your own.
+- A failed call throws `AssistantApiError`. `code` is `INVALID_INPUT`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `CONFLICT`, `RATE_LIMITED`, `NOT_CONFIGURED`, `INTERNAL`, or `UNKNOWN`. `status` is the HTTP status. `retryAfter` is set for a 429. A `200` reply with the wrong shape fails as `UNKNOWN`.
+- The client never follows a redirect and never retries. A decision that you abort after the client sends it can still apply: read `approvals()` before you try again.
+
 ## AI transparency
 
 The package marks what the assistant makes as AI-generated. This follows the idea of EU AI Act Article 50.
