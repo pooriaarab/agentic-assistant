@@ -52,6 +52,8 @@ function toCaller(context: PrincipalContext | null): Caller | undefined {
   const { principalId, kind, chain, scopes } = context;
   if (typeof principalId !== "string" || principalId === "" || !KINDS.includes(kind)) return undefined;
   if (!Array.isArray(chain) || chain.length === 0 || chain[chain.length - 1]?.id !== principalId) return undefined;
+  // The kind must agree with the chain: the last step is the caller, and a person has no parent.
+  if (chain[chain.length - 1]?.kind !== kind || (kind === "human" && chain.length !== 1)) return undefined;
   const rootId = chain[0]?.id;
   if (typeof rootId !== "string" || rootId === "") return undefined;
   if (!Array.isArray(scopes)) return undefined;
@@ -205,11 +207,12 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
   }
 
   async function decide(request: Request, caller: Caller, id: string, approve: boolean): Promise<Response> {
+    const body = await readJson(request);
+    if (body === undefined) return fail(400, "the body must be a JSON object");
+    // From here to the delete there is no await, so two decisions cannot both take the same call.
     const entry = pending.get(id);
     // A call of another owner looks like a call that does not exist.
     if (entry === undefined || entry.proposer.rootId !== caller.rootId) return fail(404, "no pending approval with this id");
-    const body = await readJson(request);
-    if (body === undefined) return fail(400, "the body must be a JSON object");
     const why = whyNotDecide(caller, entry);
     if (why !== undefined) return fail(403, why);
     let decision: ApprovalDecision;

@@ -17,7 +17,9 @@ import { createWorker } from "./worker.js";
 // 10. A key revoked during a run does not stop the run.
 // 11. A bad body, a long message, or a wrong method is accepted, or a body with no length is read in full.
 // 12. The pending list shows the arguments of a tool the caller has no scope for.
-// 13. A key that is narrowed during a run keeps its old scopes.
+// 13. Two decisions sent together both succeed, so a no is reported while the tool runs.
+// 14. A context whose kind disagrees with its chain skips the agent rules.
+// 15. A key that is narrowed during a run keeps its old scopes.
 
 const base = "https://assistant.test/api/v1";
 const ANA = "human:ana";
@@ -116,6 +118,8 @@ describe("sign-in", () => {
       { principalId: "a", kind: "human", chain: [], scopes: [] },
       { principalId: "a", kind: "human", chain: [{ id: "b", kind: "human" }], scopes: [] },
       { principalId: "a", kind: "human", chain: [{ id: "a", kind: "human" }], scopes: ["everything"] },
+      { principalId: "a", kind: "human", chain: [{ id: "b", kind: "human" }, { id: "a", kind: "human" }], scopes: [] },
+      { principalId: "a", kind: "human", chain: [{ id: "a", kind: "agent_of_human" }], scopes: [] },
       { principalId: "a", kind: undefined, chain: [{ id: "a", kind: "human" }], scopes: [] },
     ]) {
       expect((await make(async () => context).fetch(request())).status, JSON.stringify(context)).toBe(401);
@@ -280,6 +284,21 @@ describe("approvals", () => {
     expect((await decide(w, request.id, "approve", ana, { digest: request.digest })).status).toBe(404);
     await stream.all();
     expect(w.remove).toHaveBeenCalledOnce();
+  });
+
+  test("an approval and a no sent together: one wins, and the other gets a 404", async () => {
+    const { w, ana, request, stream } = await pendingRun();
+    const admin = await w.token("agent:c", "agent_of_human", [ANA, "agent:c"], ["notes:write", "assistant:admin"]);
+    const [approve, deny] = await Promise.all([
+      decide(w, request.id, "approve", admin, { digest: request.digest }),
+      decide(w, request.id, "deny", ana, { reason: "no" }),
+    ]);
+    expect([approve.status, deny.status].sort()).toEqual([200, 404]);
+    const rest = await stream.all();
+    const decision = rest.find((e) => e.event === "approval_decision")?.data;
+    // The one that got a 200 is the one the run saw.
+    expect(decision.approved).toBe(approve.status === 200);
+    expect(w.remove).toHaveBeenCalledTimes(approve.status === 200 ? 1 : 0);
   });
 
   test("a no is final: the tool never runs and the model is told it was denied", async () => {
