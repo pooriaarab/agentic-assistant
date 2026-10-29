@@ -154,7 +154,7 @@ export function parseCli(argv: string[]): Parsed {
       : { name: command as "tools" | "approvals" };
     return { command: "remote", remote, remoteCommand, json: values.json ?? false };
   }
-  if (!values.tools) throw new UsageError("--tools is required");
+  if (!values.tools) throw new UsageError(`--tools is required for ${command}: an https MCP URL, or a command that starts an MCP server on stdio`);
   if (!values["tool-scope"]) throw new UsageError("--tool-scope is required");
   const risk = values["tool-risk"] ?? "risky";
   if (!TOOL_RISKS.includes(risk as ToolRisk)) throw new UsageError(`--tool-risk must be one of ${TOOL_RISKS.join(", ")}`);

@@ -168,6 +168,7 @@ describe("usage and exit codes", () => {
 
   test.each([
     ["no tools", ["chat", "--scope", "a:read", "--tool-scope", "a:read", "--provider", "scripted", "go"], /--tools is required/],
+    ["mcp with no tools", ["mcp", "--scope", "a:read", "--tool-scope", "a:read"], /--tools is required for mcp/],
     ["no scope", ["chat", "--tools", "http://127.0.0.1:1/mcp", "--tool-scope", "a:read", "--provider", "scripted", "--script", "x", "go"], /at least one --scope/],
     ["no tool scope", ["chat", "--tools", "http://127.0.0.1:1/mcp", "--scope", "a:read", "go"], /--tool-scope is required/],
     ["a bad risk", ["chat", "--tools", "x", "--scope", "a:read", "--tool-scope", "a:read", "--tool-risk", "fine", "go"], /--tool-risk must be one of/],
