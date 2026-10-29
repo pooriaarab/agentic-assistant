@@ -1,6 +1,6 @@
 {
   "name": "agentic-assistant",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "An AI assistant that acts inside your apps with the user's own permissions.",
   "keywords": [
     "assistant",
