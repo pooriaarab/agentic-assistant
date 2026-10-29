@@ -209,10 +209,14 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
   const system = options.system === undefined ? DATA_NOTICE : `${options.system}\n\n${DATA_NOTICE}`;
   const totals: RunTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let answered: AnsweredBy | undefined;
+  const clock = (): number => {
+    const time = now();
+    return Number.isFinite(time) ? time : Date.now();
+  };
   const stamp = (extra: { approvedBy?: Approver[]; tool?: string; risk?: Provenance["risk"] } = {}): Provenance | undefined =>
     answered === undefined
       ? undefined
-      : createProvenance({ model: answered.model, provider: answered.provider, createdAt: Number.isFinite(now()) ? now() : Date.now(), actor: principal.id, onBehalfOf: principal.parentId, ...extra });
+      : createProvenance({ model: answered.model, provider: answered.provider, createdAt: clock(), actor: principal.id, onBehalfOf: principal.parentId, ...extra });
   const finish = (reason: DoneReason, error?: string): AssistantEvent => ({
     type: "done",
     reason,
@@ -307,6 +311,12 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
     }
     messages.push({ role: "assistant", content: final.content });
     answered = final.answeredBy ?? { provider: provider.name, model: provider.model, fallback: false };
+    // The record needs a model and a provider. Find a bad name now, before a tool can run.
+    if (typeof answered.model !== "string" || answered.model === "" || typeof answered.provider !== "string" || answered.provider === "") {
+      answered = undefined;
+      yield finish("provider_error", `provider "${provider.name}" gave no model name; the output cannot be marked as AI-generated`);
+      return;
+    }
     yield { type: "turn_end", turn, usage: final.usage, totals: { ...totals }, answeredBy: answered };
 
     if (final.stopReason !== "tool_use") {
