@@ -70,7 +70,6 @@ describe("panel styles", () => {
     ["edge", "warn-bg", 3],
     ["edge", "hover-bg", 3],
     ["accent-hover", "bg", 3],
-    ["warn-fg", "bg", 3],
     ["warn-fg", "bg", 4.5],
     ["muted", "warn-bg", 4.5],
     ["accent", "warn-bg", 3],
