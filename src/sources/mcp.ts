@@ -52,11 +52,14 @@ const MAX_PAGES = 20;
 /** Longest schema, as JSON text, that is passed to the model. */
 const MAX_SCHEMA_CHARS = 20_000;
 
-function positive(name: string, value: number | undefined, fallback: number): number {
+function positive(name: string, value: number | undefined, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
   const chosen = value ?? fallback;
-  if (!Number.isInteger(chosen) || chosen <= 0) throw new RangeError(`${name} must be a positive integer`);
+  if (!Number.isInteger(chosen) || chosen <= 0 || chosen > max) throw new RangeError(`${name} must be a positive integer of at most ${max}`);
   return chosen;
 }
+
+/** The longest delay setTimeout takes. A larger one fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** A fetch that stops reading a response after `limit` bytes. */
 function boundedFetch(limit: number): typeof fetch {
@@ -145,8 +148,8 @@ export async function connectMcpTools(options: ConnectMcpOptions): Promise<McpTo
   const maxOutput = positive("maxOutputChars", options.maxOutputChars, 32_768);
   const maxTools = positive("maxTools", options.maxTools, 200);
   const maxDescription = positive("maxDescriptionChars", options.maxDescriptionChars, 1000);
-  const callTimeout = positive("callTimeoutMs", options.callTimeoutMs, 30_000);
-  const loadTimeout = positive("loadTimeoutMs", options.loadTimeoutMs, 30_000);
+  const callTimeout = positive("callTimeoutMs", options.callTimeoutMs, 30_000, MAX_TIMER_MS);
+  const loadTimeout = positive("loadTimeoutMs", options.loadTimeoutMs, 30_000, MAX_TIMER_MS);
   const maxResponseBytes = positive("maxResponseBytes", options.maxResponseBytes, 4_000_000);
   const prefix = options.prefix ?? "";
   const client = new Client({ name: "agentic-assistant", version: VERSION });

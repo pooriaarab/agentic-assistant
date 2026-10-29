@@ -83,6 +83,8 @@ export class QueueApprovalGate implements ApprovalGate {
 
   request(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision> {
     return new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(new Error("the request was cancelled"));
+      if (this.waiting.has(request.id)) return reject(new Error(`a request with id "${request.id}" is already pending`));
       this.waiting.set(request.id, { request, resolve });
       signal.addEventListener(
         "abort",

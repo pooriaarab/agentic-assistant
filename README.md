@@ -92,7 +92,7 @@ for await (const event of runAssistant({ provider, registry, principal, messages
 }
 ```
 
-An approval covers one request: the tool, the exact arguments, and the acting principal. The request carries a digest of those three. The decision must return the same digest, or the call is refused. The arguments are checked again just before the tool runs. The agent cannot approve its own action. A gate that fails, a missed deadline (`approvalTimeoutMs`, default five minutes), or a wrong answer means the call is refused. To connect your own approval service, implement `ApprovalGate`: one method that returns a decision.
+An approval covers one request: the tool, the exact arguments, and the acting principal. The request carries a digest of those three. The decision must return the same digest, or the call is refused. The tool runs on a copy of the exact arguments the person saw, so a change to the original object cannot reach it. The agent cannot approve its own action. A gate that fails, a missed deadline (`approvalTimeoutMs`, default five minutes), or a wrong answer means the call is refused. To connect your own approval service, implement `ApprovalGate`: one method that returns a decision.
 
 ## Features
 

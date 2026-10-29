@@ -102,6 +102,10 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 32_768;
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN = 16;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
+/** The longest delay setTimeout takes. A larger one fires at once. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** Longest approver text kept in an event. */
+const MAX_APPROVER_TEXT = 500;
 // A cautious guess of three characters per token, used only to refuse a request that is sure to pass the token cap.
 const CHARS_PER_TOKEN_ESTIMATE = 3;
 
@@ -118,6 +122,7 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxToolResultChars = positiveInteger("maxToolResultChars", limits.maxToolResultChars, DEFAULT_MAX_TOOL_RESULT_CHARS) as number;
   const maxToolCalls = positiveInteger("maxToolCallsPerTurn", limits.maxToolCallsPerTurn, DEFAULT_MAX_TOOL_CALLS_PER_TURN) as number;
   const approvalTimeoutMs = positiveInteger("approvalTimeoutMs", limits.approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS) as number;
+  if (approvalTimeoutMs > MAX_TIMER_MS) throw new RangeError(`approvalTimeoutMs must be at most ${MAX_TIMER_MS}`);
   const prices = provider.pricing;
   if (prices !== undefined) {
     for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
@@ -364,6 +369,7 @@ interface Outcome {
 async function awaitDecision(gate: ApprovalGate, request: ApprovalRequest, parent: AbortSignal | undefined, ms: number): Promise<ApprovalDecision> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
+  if (parent?.aborted) throw new Error("the run was aborted");
   parent?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), ms);
   try {
@@ -393,7 +399,9 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
   if (!isPlainObject(call.input)) return refuse("tool input must be a JSON object", "invalid_input");
   const problem = registry.checkInput(tool.name, call.input);
   if (problem !== undefined) return refuse(`input does not match the tool schema: ${problem}`, "invalid_input");
-  const input = call.input;
+  // One frozen copy, taken now. The model call, the event consumer, and the approver can all hold the
+  // original object. The tool runs on a copy of this one, so it gets exactly what the person approved.
+  const approved = deepFreeze(structuredClone(call.input));
 
   if (tool.risk !== "safe") {
     if (ctx.gate === undefined) return refuse(`denied: "${tool.name}" needs a person's approval, and none is set up`, "approval");
@@ -401,11 +409,12 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       id: newApprovalId(),
       tool: tool.name,
       risk: tool.risk,
-      input: deepFreeze(structuredClone(input)),
-      digest: digestCall({ tool: tool.name, input, principalId: principal.id, onBehalfOf: principal.parentId }),
+      input: approved,
+      digest: digestCall({ tool: tool.name, input: approved, principalId: principal.id, onBehalfOf: principal.parentId }),
       actor: ctx.actor,
     };
     yield { type: "approval_request", request };
+    if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
     let decision: ApprovalDecision | undefined;
     let failure: string | undefined;
     try {
@@ -420,22 +429,19 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       type: "approval_decision",
       requestId: request.id,
       approved: why === undefined,
-      decidedBy: typeof decision?.decidedBy === "string" ? decision.decidedBy : undefined,
-      reason: why ?? undefined,
+      decidedBy: typeof decision?.decidedBy === "string" ? decision.decidedBy.slice(0, MAX_APPROVER_TEXT) : undefined,
+      reason: why === undefined ? undefined : why.slice(0, MAX_APPROVER_TEXT),
     };
     if (why !== undefined) {
-      const detail = declined && typeof (decision as { reason?: unknown }).reason === "string" ? `${why}: ${(decision as { reason: string }).reason}` : why;
+      const detail = (declined && typeof (decision as { reason?: unknown }).reason === "string" ? `${why}: ${(decision as { reason: string }).reason}` : why).slice(0, MAX_APPROVER_TEXT);
       return refuse("denied: a person did not approve this action", "approval", detail);
     }
-    // The arguments must still be the ones that were approved, and the principal still valid.
-    if (digestCall({ tool: tool.name, input, principalId: principal.id, onBehalfOf: principal.parentId }) !== request.digest) {
-      return refuse("denied: the arguments changed after approval", "approval");
-    }
+    // The person may have taken a while. The principal must still be valid.
     if (!(await principalActive(principal, ctx.now()))) return { ...refuse("", "approval"), stop: "principal_inactive" };
   }
 
   try {
-    const value = await tool.handler(input, { principal, toolUseId: call.id, signal });
+    const value = await tool.handler(structuredClone(approved) as Record<string, unknown>, { principal, toolUseId: call.id, signal });
     const serialized = serialize(value);
     return {
       content: limitText(serialized, ctx.limits.maxToolResultChars),

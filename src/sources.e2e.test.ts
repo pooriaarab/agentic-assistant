@@ -173,6 +173,7 @@ describe("MCP over stdio", () => {
     ["maxOutputChars", { maxOutputChars: -1 }],
     ["maxDescriptionChars", { maxDescriptionChars: Number.NaN }],
     ["callTimeoutMs", { callTimeoutMs: 0 }],
+    ["callTimeoutMs", { callTimeoutMs: 3_000_000_000 }],
     ["loadTimeoutMs", { loadTimeoutMs: 1.5 }],
     ["maxResponseBytes", { maxResponseBytes: 0 }],
   ])("a bad %s is refused before anything starts", async (name, limits) => {

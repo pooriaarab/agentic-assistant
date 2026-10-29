@@ -27,6 +27,10 @@ import { ScriptedProvider, type ScriptedTurn } from "./testing.js";
 // 10. A safe tool asks for approval, or an irreversible tool is not marked.
 // 11. A tool is registered with no risk, or a risk that does not exist.
 // 12. The digest changes with key order, so one call gets two digests.
+// 13. The tool runs on arguments that changed after the person approved (the model call and the
+//     event consumer hold the original object, and the revocation check awaits before the call).
+// 14. An abort at the moment the request is shown waits for the deadline, and the entry stays queued.
+// 15. A timeout too large for setTimeout fires at once.
 
 const AGENT = "agent:a1";
 const principal = (extra: Partial<Parameters<typeof createPrincipal>[0]> = {}) =>
@@ -176,16 +180,47 @@ describe("approvals", () => {
     expect(handler).toHaveBeenCalledWith({ id: "n1" }, expect.anything());
   });
 
-  test("arguments that change after the request was made are refused", async () => {
+  test("the tool runs on the arguments that were approved, even if the original object changes", async () => {
     const args = { id: "n1" };
     const gate = gateOf((request) => {
       args.id = "evil"; // the same object the model call holds
       return { requestId: request.id, approved: true, digest: request.digest, decidedBy: "human:alice" };
     });
     const { write: handler, run } = setup([{ toolCalls: [{ name: "notes_write", input: args }] }, { text: "ok" }], gate);
-    const events = await run();
-    expect(handler).not.toHaveBeenCalled();
-    expect(results(events)[0]?.content).toContain("arguments changed after approval");
+    await run();
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ id: "n1" }, expect.anything());
+  });
+
+  test("a change that lands while the revocation check waits does not reach the tool", async () => {
+    const args = { id: "n1" };
+    let checks = 0;
+    const { write: handler, run } = setup(
+      [{ toolCalls: [{ name: "notes_write", input: args }] }, { text: "ok" }],
+      approveAs("human:alice"),
+      undefined,
+      {
+        isRevoked: async () => {
+          // Checks 1 and 2 come before the request. Check 3 comes after the person approved.
+          if (++checks >= 3) args.id = "evil";
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return false;
+        },
+      },
+    );
+    await run();
+    expect(handler).toHaveBeenCalledWith({ id: "n1" }, expect.anything());
+  });
+
+  test("a handler that changes its input cannot change what was approved", async () => {
+    const gate = new QueueApprovalGate();
+    const { write: handler, run } = setup([write("n1"), { text: "ok" }], gate);
+    handler.mockImplementation((input: Record<string, unknown>) => {
+      input.id = "changed";
+      return "ok";
+    });
+    const events = await run((request) => gate.approve(request.id, "human:alice"));
+    expect(asked(events)[0]?.request.input).toEqual({ id: "n1" });
   });
 
   test("a principal revoked while the call waits stops the run", async () => {
@@ -205,6 +240,40 @@ describe("approvals", () => {
     const used = done(events).messages.flatMap((m) => m.content.filter((b) => b.type === "tool_use"));
     const answered = done(events).messages.flatMap((m) => m.content.filter((b) => b.type === "tool_result"));
     expect(answered).toHaveLength(used.length);
+  });
+
+  test("an abort at the moment the request is shown ends the run at once and clears the queue", async () => {
+    const controller = new AbortController();
+    const gate = new QueueApprovalGate();
+    const { write: handler, run } = setup([write(), { text: "ok" }], gate, { approvalTimeoutMs: 60_000 });
+    const started = Date.now();
+    const events: AssistantEvent[] = [];
+    const principalForRun = principal();
+    for await (const event of runAssistant({
+      provider: new ScriptedProvider([write(), { text: "ok" }]),
+      registry: new ToolRegistry().register({ name: "notes_write", description: "d", inputSchema: { type: "object", properties: { id: { type: "string" } } }, scope: "notes:write", risk: "risky", handler }),
+      principal: principalForRun,
+      approvals: gate,
+      signal: controller.signal,
+      messages: [],
+    })) {
+      events.push(event);
+      if (event.type === "approval_request") controller.abort();
+    }
+    void run;
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(done(events).reason).toBe("aborted");
+    expect(gate.pending()).toEqual([]);
+    expect(handler).not.toHaveBeenCalled();
+    expect(events.some((e) => e.type === "approval_decision" || e.type === "tool_result")).toBe(false);
+    expect(done(events).messages.at(-1)?.content).toEqual([{ type: "tool_result", toolUseId: "call_1_0", content: "not run: aborted", isError: true }]);
+  });
+
+  test("a timeout clears the queue", async () => {
+    const gate = new QueueApprovalGate();
+    const { run } = setup([write(), { text: "ok" }], gate, { approvalTimeoutMs: 100 });
+    await run();
+    expect(gate.pending()).toEqual([]);
   });
 
   test("an abort while the call waits ends the run", async () => {
@@ -227,9 +296,17 @@ describe("approvals", () => {
     expect(asked(events)).toHaveLength(0);
   });
 
-  test("a bad approval deadline is refused", async () => {
-    const { run } = setup([{ text: "hi" }], new QueueApprovalGate(), { approvalTimeoutMs: 0 });
+  test.each([[0], [Number.NaN], [3_000_000_000]])("a bad approval deadline %j is refused", async (approvalTimeoutMs) => {
+    const { run } = setup([{ text: "hi" }], new QueueApprovalGate(), { approvalTimeoutMs });
     await expect(run()).rejects.toThrow(RangeError);
+  });
+
+  test("approver text in events is cut", async () => {
+    const { run } = setup([write(), { text: "ok" }], gateOf((request) => ({ requestId: request.id, approved: false, decidedBy: "x".repeat(10_000), reason: "y".repeat(10_000) })));
+    const events = await run();
+    const decision = events.find((e) => e.type === "approval_decision") as Extract<AssistantEvent, { type: "approval_decision" }>;
+    expect((decision.decidedBy ?? "").length).toBeLessThanOrEqual(500);
+    expect((results(events)[0]?.detail ?? "").length).toBeLessThanOrEqual(500);
   });
 });
 
@@ -260,6 +337,13 @@ describe("digest", () => {
     const base = { tool: "t", principalId: "p", onBehalfOf: "h" };
     expect(digestCall({ ...base, input: { a: 1, b: { c: 2, d: 3 } } })).toBe(digestCall({ ...base, input: { b: { d: 3, c: 2 }, a: 1 } }));
     expect(canonicalJson({ a: undefined, b: 1 })).toBe(canonicalJson({ b: 1 }));
+  });
+
+  test("handles an own __proto__ key and unicode keys", () => {
+    const base = { tool: "t", principalId: "p", onBehalfOf: "h" };
+    const withProto = JSON.parse('{"__proto__":1,"é":2}') as Record<string, unknown>;
+    expect(digestCall({ ...base, input: withProto })).not.toBe(digestCall({ ...base, input: { é: 2 } }));
+    expect(digestCall({ ...base, input: withProto })).toBe(digestCall({ ...base, input: JSON.parse('{"é":2,"__proto__":1}') }));
   });
 
   test("changes with the tool, an argument, array order, or the principal", () => {
