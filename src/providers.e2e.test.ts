@@ -81,8 +81,8 @@ function blockEvents(block: { type: string; [k: string]: any }, index: number): 
 function harness(provider: ModelProvider) {
   const calls: unknown[] = [];
   const registry = new ToolRegistry()
-    .register({ name: "notes_read", description: "Read a note", inputSchema: { type: "object", properties: { id: { type: "string" } } }, scope: "notes:read", handler: (input) => { calls.push(input); return "note body"; } })
-    .register({ name: "notes_delete", description: "Delete", inputSchema: { type: "object" }, scope: "notes:write", handler: () => "gone" });
+    .register({ name: "notes_read", description: "Read a note", inputSchema: { type: "object", properties: { id: { type: "string" } } }, scope: "notes:read", risk: "safe", handler: (input) => { calls.push(input); return "note body"; } })
+    .register({ name: "notes_delete", description: "Delete", inputSchema: { type: "object" }, scope: "notes:write", risk: "safe", handler: () => "gone" });
   const run = async (): Promise<AssistantEvent[]> => {
     const events: AssistantEvent[] = [];
     for await (const e of runAssistant({

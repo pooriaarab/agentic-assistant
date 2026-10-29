@@ -7,8 +7,8 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: early. The core loop and the tool sources work. It is not on npm yet. Approvals,
-> the React panel, and the chat CLI are not built yet.
+> Status: early. The core loop, the tool sources, and approvals work. It is not on npm yet.
+> The React panel and the chat CLI are not built yet.
 
 ## Install
 
@@ -29,6 +29,7 @@ const registry = new ToolRegistry().register({
   description: "Read one note by id",
   inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   scope: "notes:read",
+  risk: "safe", // "risky" and "irreversible" tools wait for a person
   handler: async ({ id }) => ({ text: `note ${id}` }),
 });
 
@@ -66,6 +67,8 @@ const mcp = await connectMcpTools({
     if (scope === undefined) throw new Error("tool is not on the host's list");
     return scope;
   },
+  // The host also says how risky each tool is. There is no default.
+  risk: (tool) => (tool.name === "notes_read" ? "safe" : "risky"),
 });
 registry.registerAll(mcp.tools); // mcp.skipped lists tools that were not loaded, with the reason
 // ...run the assistant, then:
@@ -74,6 +77,23 @@ await mcp.close();
 
 An HTTP server works the same way: `{ type: "http", url: "https://tools.example.eu/mcp", headers: { authorization: "Bearer ..." } }`.
 
+## Ask a person before a risky action
+
+```ts
+import { QueueApprovalGate } from "agentic-assistant";
+
+const approvals = new QueueApprovalGate();
+for await (const event of runAssistant({ provider, registry, principal, messages, approvals })) {
+  if (event.type === "approval_request") {
+    showToPerson(event.request); // tool, risk, exact arguments
+    // later, when the person clicks: approvals.approve(event.request.id, "user-42")
+    //                           or:   approvals.reject(event.request.id, "user-42", "not now")
+  }
+}
+```
+
+An approval covers one request: the tool, the exact arguments, and the acting principal. The request carries a digest of those three. The decision must return the same digest, or the call is refused. The arguments are checked again just before the tool runs. The agent cannot approve its own action. A gate that fails, a missed deadline (`approvalTimeoutMs`, default five minutes), or a wrong answer means the call is refused. To connect your own approval service, implement `ApprovalGate`: one method that returns a decision.
+
 ## Features
 
 - **Model port.** `ModelProvider` has two adapters. `AnthropicProvider` needs a `baseUrl`, or `useDefaultEndpoint: true` to call `api.anthropic.com`, which is a US-hosted endpoint. There is no silent default. `OpenAICompatibleProvider` calls any server that speaks the chat-completions stream, so you can use an EU-hosted model. Both adapters need an `https` URL, except for `localhost`. If you pass your own `client` to `AnthropicProvider`, you own its endpoint. The OpenAI-compatible adapter needs an API key for any other host and cuts a response at a size limit.
@@ -81,6 +101,7 @@ An HTTP server works the same way: `{ type: "http", url: "https://tools.example.
 - **Tool sources.** Load tools from an MCP server over stdio or HTTP, or write typed SDK tools with `defineTool`. The loader skips a tool with a bad name, schema, or scope. It keeps text output and leaves images and other content out. It cuts long output, long descriptions, and long text inside schemas. It skips a duplicate name, a schema that is too large, and a schema with a regular expression (`pattern`). It stops at a page limit, a load time, and a size limit on each HTTP response.
 - **Input validation.** The loop checks each call against the tool's JSON Schema before the handler runs. Nothing is coerced. A bad call returns an error to the model and never reaches the tool.
 - **Tool output is data.** Each result is quoted in `<tool_output>` tags. Every `<` in the output is escaped. Every request carries a notice that tool output is never an instruction. This lowers the risk of prompt injection. It does not remove it: keep tools narrow and scopes small.
+- **Approvals.** Every tool has a required `risk`: `safe`, `risky`, or `irreversible`. The loop asks the `ApprovalGate` before a risky or irreversible call. With no gate, those tools are not offered and are refused. The text a person writes when they decline goes to the event, not to the model.
 - **Fixed principal.** The assistant always acts as `agent_of_human`. `createPrincipal` throws when the kind is missing or different.
 - **Caps.** A max-turn cap, a total-token cap, and a cost cap. A cap that trips stops the run. No tool runs after that. A tool result is cut at `maxToolResultChars`. A request that is sure to pass the token cap is not sent. The cost cap also limits the output of each request. A turn with more than `maxToolCallsPerTurn` calls (default 16) runs none of them.
 - **Stops that fail closed.** An expired or revoked principal stops the run. So does a revocation check that throws or returns anything but `false`. The loop checks the principal again at the start of each run. A provider error ends the run with `reason: "provider_error"` and keeps the transcript. Truncated or refused model output never runs its tool calls.
@@ -89,7 +110,8 @@ An HTTP server works the same way: `{ type: "http", url: "https://tools.example.
 
 ## Limits
 
-- No approvals yet. A risky tool runs when the scope allows it.
+- The gate trusts the name that `decidedBy` carries. Your gate must check who the person is. `QueueApprovalGate` does not.
+- `agentic-approve` is a review queue for drafts. It cannot bind an approval to a call or wait for an answer, so this package does not use it. An adapter that wraps it is possible.
 - An MCP server is trusted for its own output only. The assistant does not sandbox the server process. Run stdio servers you trust.
 - Token and cost caps need the provider to report usage. The OpenAI-compatible adapter throws when the server sends none.
 - A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices are from 2026-10-06. Check them.

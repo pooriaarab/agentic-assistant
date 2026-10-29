@@ -1,5 +1,6 @@
 import Ajv2020Module from "ajv/dist/2020.js";
 import type { AssistantPrincipal } from "./principal.js";
+import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
 import { parseScope, type Scope } from "./scopes.js";
 import type { JsonSchema, ToolSpec } from "./types.js";
 
@@ -16,6 +17,8 @@ export interface ToolDefinition<Input = Record<string, unknown>> {
   inputSchema: JsonSchema;
   /** The scope the acting principal must hold to call this tool. */
   scope: Scope;
+  /** How much harm a call can do. `risky` and `irreversible` wait for a person's approval. Every tool must say. */
+  risk: ToolRisk;
   handler(input: Input, context: ToolContext): Promise<unknown> | unknown;
 }
 
@@ -49,12 +52,13 @@ function usesRegexKeyword(value: unknown): boolean {
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: ToolDefinition; validate: ValidateWithErrors }>();
   // One validator per registry, so an `$id` in one tool's schema cannot clash with another registry's.
-  private readonly ajv = new Ajv2020({ strict: false, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
+  private readonly ajv = new Ajv2020({ strict: false, logger: false, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
 
   register(tool: ToolDefinition): this {
     if (!NAME_PATTERN.test(tool.name)) throw new Error(`invalid tool name "${tool.name}"`);
     if (this.tools.has(tool.name)) throw new Error(`tool "${tool.name}" is already registered`);
     parseScope(tool.scope);
+    if (!TOOL_RISKS.includes(tool.risk)) throw new Error(`tool "${tool.name}" needs a risk of safe, risky, or irreversible`);
     if (tool.inputSchema?.type !== "object") throw new Error(`tool "${tool.name}" needs an input schema with type "object"`);
     if (usesRegexKeyword(tool.inputSchema)) {
       throw new Error(`tool "${tool.name}" has an input schema with a regular expression (pattern), which is not allowed`);
@@ -88,7 +92,11 @@ export class ToolRegistry {
   checkInput(name: string, input: unknown): string | undefined {
     const entry = this.tools.get(name);
     if (entry === undefined) return `unknown tool "${name}"`;
-    if (entry.validate(input)) return undefined;
+    try {
+      if (entry.validate(input)) return undefined;
+    } catch {
+      return "input is nested too deeply to check";
+    }
     const first = entry.validate.errors?.[0];
     if (first === undefined) return "input is not valid";
     const extra = typeof first.params.additionalProperty === "string" ? ` "${first.params.additionalProperty}"` : "";

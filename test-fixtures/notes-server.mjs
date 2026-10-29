@@ -16,6 +16,7 @@ const TOOLS = [
   { name: "long_text", description: "x".repeat(5000), inputSchema: object({ id: { type: "string", description: "y".repeat(5000) } }), annotations: { readOnlyHint: true } },
   { name: "with_pattern", description: "A schema with a regular expression", inputSchema: object({ q: { type: "string", pattern: "^(a|a)*$" } }), annotations: { readOnlyHint: true } },
   { name: "huge_schema", description: "A schema that is too large", inputSchema: object(Object.fromEntries(Array.from({ length: 800 }, (_, i) => [`field_number_${i}`, { type: "string" }]))), annotations: { readOnlyHint: true } },
+  { name: "examples_prop", description: "A property named examples", inputSchema: object({ examples: { type: "array" } }, ["examples"]), annotations: { readOnlyHint: true } },
   { name: "stats", description: "Read the call counters", inputSchema: object({}), annotations: { readOnlyHint: true } },
   { name: "bad name!", description: "A name the assistant refuses", inputSchema: object({}) },
   { name: "bad_schema", description: "A schema that does not compile", inputSchema: { type: "object", properties: { a: { type: "nonsense" } } } },
@@ -57,6 +58,8 @@ export function createNotesServer(counters = {}, { pageSize, endless, duplicate 
         return { content: [], structuredContent: { a: 1 } };
       case "pid":
         return text(String(process.pid));
+      case "examples_prop":
+        return text("ok");
       case "long_text":
         return text("ok");
       case "stats":
