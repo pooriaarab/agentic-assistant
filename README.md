@@ -236,7 +236,7 @@ The record says who made the content. It does not say the content is true.
 
 - The hosted API keeps pending approvals in the memory of one Worker instance. A decision must reach the instance that holds the chat stream. Run it on one instance or behind sticky routing until a shared queue exists. It has no per-IP limit, only a cap of four chat turns at once per principal.
 - The tests run the API under Node with a fake model. They do not run it under `wrangler dev`. The demo Worker was checked by hand under `wrangler dev` and on workers.dev.
-- Workers refuse code generation, so there a tool schema is checked by a small built-in checker, not by Ajv. It supports type, properties, required, additionalProperties, enum, const, items, length and size bounds, and anyOf, oneOf, allOf. It refuses a tool whose schema has any other keyword, such as `$ref`.
+- Workers refuse code generation, so there a tool schema is checked by a small built-in checker, not by Ajv. It supports type, properties, required, additionalProperties, enum, const, items, length and size bounds, and anyOf, oneOf, allOf. It accepts annotation keywords such as `description` and `format` but does not check `format`, as the Ajv setup does not. It refuses a tool whose schema has any other keyword, such as `$ref`.
 - The CLI reads one message, or a short conversation on a terminal. It does not keep a conversation between runs.
 - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
 - The panel shows plain text, not Markdown.

@@ -87,6 +87,7 @@ export default {
       demo = await built;
     } catch {
       demos.delete(env);
+      // A broken setup answers 503 before sign-in. The answer holds no detail.
       return notConfigured("this demo is not set up");
     }
     if (request.method === "POST" && url.pathname.replace(/\/$/, "") === "/api/v1/chat" && modelOptions(env) === undefined) {
