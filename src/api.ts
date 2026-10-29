@@ -16,6 +16,8 @@ export interface AssistantApiOptions {
   registry: ToolRegistry;
   system?: string;
   limits?: RunLimits;
+  /** Origins (such as `https://app.example.org`) that may send a write signed in with a session cookie. A write with a cookie from any other origin is a 403. A Bearer key needs no origin. */
+  origins?: readonly string[];
   /** Most chat turns one principal may run at once. Default 4. */
   maxConcurrentRuns?: number;
 }
@@ -28,9 +30,9 @@ const DEFAULT_MAX_CONCURRENT_RUNS = 4;
 export const APPROVER_SCOPE = "assistant:admin";
 
 /** Reads the credential with the identity middleware. A caller, or the Response to send back. */
-async function callerOf(request: Request, auth: Auth): Promise<Caller | Response> {
-  const found = await requirePrincipal(request, auth);
-  // The body stays this API's own text for a 401, so a client sees one message for every refusal.
+async function callerOf(request: Request, auth: Auth, origins?: readonly string[]): Promise<Caller | Response> {
+  const found = await requirePrincipal(request, auth, { origins });
+  // A 401 keeps this API's own text. A 403 or a 503 keeps the identity body.
   if (found instanceof Response) return found.status === 401 ? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" }) : found;
   return toCaller(found) ?? fail(401, "sign in with a valid key", { "www-authenticate": "Bearer" });
 }
@@ -191,7 +193,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
           scopes: caller.scopes,
           // Each check asks the Auth again. A key revoked during a run, or one with other scopes, stops it.
           isRevoked: async () => {
-            const now = await callerOf(request, options.auth);
+            const now = await callerOf(request, options.auth, options.origins);
             return now instanceof Response || now.id !== caller.id || [...now.scopes].sort().join(" ") !== [...caller.scopes].sort().join(" ");
           },
         }),
@@ -264,7 +266,7 @@ export function createAssistantApi(options: AssistantApiOptions): { fetch(reques
       if (request.method !== allowed) return fail(405, "method not allowed", { allow: allowed });
       if (route !== "approvals" && id !== undefined) return fail(404, "not found");
 
-      const caller = await callerOf(request, options.auth);
+      const caller = await callerOf(request, options.auth, options.origins);
       if (caller instanceof Response) return caller;
 
       if (route === "tools") {

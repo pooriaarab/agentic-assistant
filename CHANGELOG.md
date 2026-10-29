@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+Added
+
+- `origins` option on `createAssistantApi` and `createWorker`: origins that may send a write signed in with a session cookie.
+
+Changed
+
+- The HTTP API reads the credential with `requirePrincipal` from `agentic-identity/http` and checks the kind with `PRINCIPAL_KINDS`. The `agentic-identity` dependency is now `^0.6.0`.
+- A bearer token must hold only `A-Za-z0-9_-` and at most 512 characters, or the call is a 401. `createStaticTokenAuth` refuses other tokens when it is built.
+- An Auth that throws gives a 503, not a 401. A cookie write from an origin not in `origins` gives a 403.
+
 ## 0.3.0
 
 Added
