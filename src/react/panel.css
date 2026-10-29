@@ -6,17 +6,17 @@
 .aa-panel {
   --aa-bg: var(--ad-color-surface, Canvas);
   --aa-fg: var(--ad-color-text, CanvasText);
-  --aa-muted: var(--ad-color-text-muted, GrayText);
-  --aa-border: var(--ad-color-border-strong, GrayText);
+  --aa-muted: var(--ad-color-text-muted, CanvasText);
+  --aa-border: var(--ad-color-border-strong, CanvasText);
   --aa-accent: var(--ad-color-accent, LinkText);
   --aa-accent-fg: var(--ad-color-text-on-accent, Canvas);
-  --aa-focus: var(--ad-color-focus, Highlight);
+  --aa-focus: var(--ad-color-focus, LinkText);
   --aa-machine-bg: var(--ad-color-accent-subtle, Canvas);
   --aa-machine-fg: var(--ad-color-accent-text, CanvasText);
   --aa-card-bg: var(--ad-color-surface-sunken, Canvas);
   --aa-warn-bg: var(--ad-color-warning-subtle, Canvas);
   --aa-warn-fg: var(--ad-color-warning-text, CanvasText);
-  --aa-danger: var(--ad-color-danger, CanvasText);
+  --aa-danger: var(--ad-color-danger, LinkText);
 
   display: flex;
   flex-direction: column;

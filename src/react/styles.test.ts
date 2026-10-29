@@ -8,10 +8,13 @@ import { describe, expect, test } from "vitest";
 // 3. The sheet loads a font, image, or file from another host (a CDN call).
 // 4. The sheet holds a hard-coded color, or names a token that agentic-design does not define.
 // 5. The tokens give a pair that is under the minimum in the dark theme.
+// 6. A fallback for a missing token sheet is a system color that is hard to read on Canvas.
 
 const css = readFileSync(new URL("./panel.css", import.meta.url), "utf8");
 const tokenCss = readFileSync(createRequire(import.meta.url).resolve("agentic-design/tokens.css"), "utf8");
-const mapping = Object.fromEntries([...css.matchAll(/--aa-([a-z-]+):\s*var\(--ad-color-([a-z-]+), [A-Za-z]+\);/g)].map((m) => [m[1] as string, m[2] as string]));
+const declared = [...css.matchAll(/--aa-([a-z-]+):\s*var\(--ad-color-([a-z-]+), ([A-Za-z]+)\);/g)];
+const mapping = Object.fromEntries(declared.map((m) => [m[1] as string, m[2] as string]));
+const fallback = Object.fromEntries(declared.map((m) => [m[1] as string, m[3] as string]));
 
 /** The colors in the first block of tokens.css whose selector holds `selector`. */
 function theme(selector: string): Record<string, string> {
@@ -41,7 +44,7 @@ describe("panel styles", () => {
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
       for (const [key, value] of Object.entries(variablesFor(name))) expect(value, `${name} ${key}`).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
-    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/);
     expect(themes.dark).not.toEqual(themes.light);
     expect(themes.os_dark).toEqual(themes.dark);
   });
@@ -67,6 +70,14 @@ describe("panel styles", () => {
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
       const variables = variablesFor(name);
       expect(contrast(variables[fg as string] as string, variables[bg as string] as string), name).toBeGreaterThanOrEqual(minimum as number);
+    }
+  });
+
+  // System colors cannot be read as hex, so this pins each fallback to one that contrasts with Canvas.
+  test("fallbacks without the tokens are readable system colors", () => {
+    const backgrounds = ["bg", "machine-bg", "card-bg", "warn-bg", "accent-fg"];
+    for (const [key, value] of Object.entries(fallback)) {
+      expect(value, key).toBe(backgrounds.includes(key) ? "Canvas" : key === "accent" || key === "focus" || key === "danger" ? "LinkText" : "CanvasText");
     }
   });
 
