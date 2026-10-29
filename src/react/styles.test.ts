@@ -69,6 +69,7 @@ describe("panel styles", () => {
     ["focus", "hover-bg", 3],
     ["edge", "warn-bg", 3],
     ["edge", "hover-bg", 3],
+    ["accent-hover", "bg", 3],
     ["warn-fg", "bg", 3],
   ])("%s on %s is at least %s:1 in light, dark, and OS dark", (fg, bg, minimum) => {
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
@@ -113,6 +114,13 @@ describe("panel styles", () => {
     expect([...css.replace(/\/\*[^]*?\*\//g, "").matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1] as string).filter((name) => !name.startsWith("agd-"))).toEqual([]);
     expect(css).toMatch(/\.agd-assistant__input \{[^}]*border: 1px solid var\(--aa-edge\)/);
     expect(css).toMatch(/\.agd-assistant__button \{[^}]*border: 1px solid var\(--aa-edge\)/);
+    expect(css).toMatch(/\.agd-assistant__button:disabled \{[^}]*border-style: dashed/);
+  });
+
+  test("every --agd- token the sheet reads is one that agentic-design defines", () => {
+    const names = new Set([...css.matchAll(/var\(--(agd-[\w-]+)/g)].map((m) => m[1] as string));
+    expect(names.size).toBeGreaterThan(0);
+    for (const name of names) expect(tokenCss, name).toMatch(new RegExp(`--${name}:`));
   });
 
   test("loads nothing from another host", () => {
