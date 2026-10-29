@@ -5,6 +5,7 @@ An AI assistant that acts inside your apps with the user's own permissions.
 Keywords: assistant,ai,agent,tools,mcp,sdk,side-panel,approvals,eu,model-port.
 
 - SDK: import { runAssistant, ToolRegistry, createPrincipal } from "agentic-assistant".
+- CLI: agentic-assistant chat --tools <mcp-url> --scope <s> --tool-scope <s> "message". MCP server: agentic-assistant mcp.
 - Panel: import { AssistantPanel } from "agentic-assistant/react"; import "agentic-assistant/react.css".
 - Test provider: import { ScriptedProvider } from "agentic-assistant/testing".
 

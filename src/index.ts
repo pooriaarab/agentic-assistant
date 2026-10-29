@@ -28,3 +28,6 @@ export type {
   ToolSpec,
   Usage,
 } from "./types.js";
+export { createAssistantMcpServer, startAssistantMcp } from "./mcp-server.js";
+export { buildSetup, runChat, ConfigError, parseTarget } from "./chat.js";
+export type { ChatConfig, ChatIo, Setup } from "./chat.js";

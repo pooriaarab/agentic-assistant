@@ -7,8 +7,8 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: version 0.1.0, the first release. The core loop, the tool sources, approvals, and the React panel work.
-> The chat CLI and the MCP server are not built yet. The `agentic-assistant` command only prints help and version.
+> Status: version 0.1.0 is the first release. The core loop, the tool sources, approvals, and the React panel work.
+> This branch adds the chat CLI and the MCP server. There is no hosted HTTP API yet.
 
 ## Install
 
@@ -120,6 +120,35 @@ The panel streams the answer, shows each tool call as a card, and shows an appro
 
 The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.aa-panel` or a parent. The sheet loads no font, image, or file from another host. A prompt that the run left open (after Stop or an error) is closed and marked expired. Closing the panel stops the run.
 
+## Use the CLI
+
+```sh
+export ANTHROPIC_API_KEY=...
+agentic-assistant chat \
+  --tools https://notes.example.eu/mcp --tools-header-env authorization=NOTES_TOKEN \
+  --scope notes:read --tool-scope notes:read --tool-risk safe \
+  --use-default-endpoint \
+  "What does note 7 say?"
+```
+
+The assistant prints its answer on stdout. It prints tool calls, approvals, and a summary on stderr, and it marks each one as machine-made. Add `--json` to get one event per line on stdout: that is the form for agents and tests. The exit code is 0 when the run ends normally, 1 when it stops for another reason (a cap, an error), and 2 for a usage error.
+
+- `--tools` takes an `https` MCP URL, or a command that starts a server on stdio (words split on spaces, or a JSON list like `'["node","server.js"]'`).
+- `--scope` is what the assistant may hold. `--tool-scope` is what each tool needs. Both are required, and the CLI guesses neither.
+- `--tool-risk` defaults to `risky`. A risky call needs approval. Approve one exact call ahead of time with `--approve-call '{"tool":"notes_write","input":{"id":"7","text":"hi"}}'`. The call must match the tool and the arguments, and each approval is used once. On a terminal, `--approve ask` asks you.
+- Keys come from the environment: `ANTHROPIC_API_KEY`, or the variable named by `--api-key-env`. There is no flag that takes a key.
+- For an EU-hosted model, use `--provider openai-compatible --base-url https://models.example.eu/v1 --model <id> --api-key-env EU_KEY`. Add `--price-in` and `--price-out` to use the cost cap.
+- Limits: `--max-turns`, `--max-tokens`, `--max-cost`, `--max-tool-calls`.
+- `--provider scripted --script turns.json` replays fixed turns. It is for tests.
+
+## Run it as an MCP server
+
+```sh
+agentic-assistant mcp --tools https://notes.example.eu/mcp --scope notes:read --tool-scope notes:read --tool-risk safe --use-default-endpoint
+```
+
+Add this to an MCP client as a stdio server. It offers one tool, `assistant_chat`, with one argument, `message`. Each call starts a new conversation. The reply is JSON with `machineMade: true`, the answer, the stop reason, and the tool calls. A run that stops on a cap is an error result. The server cannot ask a person, so a risky call runs only when you started the server with a matching `--approve-call`.
+
 ## Features
 
 - **Model port.** `ModelProvider` has two adapters. `AnthropicProvider` needs a `baseUrl`, or `useDefaultEndpoint: true` to call `api.anthropic.com`, which is a US-hosted endpoint. There is no silent default. `OpenAICompatibleProvider` calls any server that speaks the chat-completions stream, so you can use an EU-hosted model. Both adapters need an `https` URL, except for `localhost`. If you pass your own `client` to `AnthropicProvider`, you own its endpoint. The OpenAI-compatible adapter needs an API key for any other host and cuts a response at a size limit.
@@ -128,7 +157,8 @@ The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, an
 - **Input validation.** The loop checks each call against the tool's JSON Schema before the handler runs. Nothing is coerced. A bad call returns an error to the model and never reaches the tool.
 - **Tool output is data.** Each result is quoted in `<tool_output>` tags. Every `<` in the output is escaped. Every request carries a notice that tool output is never an instruction. This lowers the risk of prompt injection. It does not remove it: keep tools narrow and scopes small.
 - **Approvals.** Every tool has a required `risk`: `safe`, `risky`, or `irreversible`. The loop asks the `ApprovalGate` before a risky or irreversible call. With no gate, those tools are not offered and are refused. The text a person writes when they decline goes to the event, not to the model.
-- **React panel.** `agentic-assistant/react` has `AssistantPanel` and `useAssistant`. It meets the WCAG 2.2 AA points that code can check: named controls, a live conversation log, keyboard use, focus that moves to an approval prompt and then to the message box, buttons that are at least 32 px, a visible focus ring, and a color palette checked for contrast.
+- **React panel.** `agentic-assistant/react` has `AssistantPanel` and `useAssistant`. It is built to these WCAG 2.2 AA points: named controls, a live conversation log, keyboard use, focus that moves to an approval prompt and then to the message box, buttons that are at least 32 px, a visible focus ring, and a color palette checked for contrast.
+- **CLI and MCP server.** `chat` and `mcp` take the host choices as flags and refuse to guess a scope.
 - **Fixed principal.** The assistant always acts as `agent_of_human`. `createPrincipal` throws when the kind is missing or different.
 - **Caps.** A max-turn cap, a total-token cap, and a cost cap. A cap that trips stops the run. No tool runs after that. A tool result is cut at `maxToolResultChars`. A request that is sure to pass the token cap is not sent. The cost cap also limits the output of each request. A turn with more than `maxToolCallsPerTurn` calls (default 16) runs none of them.
 - **Stops that fail closed.** An expired or revoked principal stops the run. So does a revocation check that throws or returns anything but `false`. The loop checks the principal again at the start of each run. A provider error ends the run with `reason: "provider_error"` and keeps the transcript. Truncated or refused model output never runs its tool calls.
@@ -137,7 +167,8 @@ The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, an
 
 ## Limits
 
-- The chat CLI and the MCP server are not built. The `agentic-assistant` command prints help and version only.
+- There is no hosted HTTP API. The Worker only answers `/health`.
+- The CLI reads one message, or a short conversation on a terminal. It does not keep a conversation between runs.
 - The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
 - The panel shows plain text, not Markdown.
 - The gate trusts the name that `decidedBy` carries. Your gate must check who the person is. `QueueApprovalGate` does not.
@@ -153,6 +184,12 @@ The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, an
 ```sh
 npm ci
 npm run ci:local
+```
+
+The live smoke test calls the real Anthropic API. It costs a few cents, so it runs only when you ask:
+
+```sh
+AGENTIC_ASSISTANT_LIVE=1 ANTHROPIC_API_KEY=... npx vitest run src/live.smoke.test.ts
 ```
 
 ## License

@@ -57,7 +57,8 @@ export function refuseDecision(decision: unknown, request: ApprovalRequest, prin
   if (typeof decision !== "object" || decision === null) return "the approver sent no decision";
   const d = decision as Partial<Record<"requestId" | "approved" | "digest" | "decidedBy" | "reason", unknown>>;
   if (d.requestId !== request.id) return "the decision is for another request";
-  if (d.approved !== true) return "the person declined";
+  if (d.approved === false) return "the person declined";
+  if (d.approved !== true) return "the decision is not a clear yes or no";
   if (d.digest !== request.digest) return "the approval is for other arguments";
   if (typeof d.decidedBy !== "string" || d.decidedBy.length === 0) return "the approval names no approver";
   if (d.decidedBy === principalId) return "an agent cannot approve its own action";

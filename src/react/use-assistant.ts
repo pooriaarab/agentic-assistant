@@ -78,6 +78,7 @@ export function useAssistant(options: UseAssistantOptions) {
     const sent = [...history.current, userMessage];
     let streamingId: string | null = null;
     let finished = false;
+    let failed = false;
     const toolItems = new Map<string, string>();
     let lastToolItem: string | null = null;
     try {
@@ -118,7 +119,7 @@ export function useAssistant(options: UseAssistantOptions) {
               item.kind === "approval"
                 ? {
                     ...item,
-                    status: event.approved ? "approved" : event.reason === "the person declined" ? "declined" : "unavailable",
+                    status: event.approved ? "approved" : event.declined ? "declined" : "unavailable",
                     busy: false,
                     decidedBy: event.decidedBy,
                   }
@@ -148,12 +149,18 @@ export function useAssistant(options: UseAssistantOptions) {
         }
       }
     } catch {
-      add({ kind: "notice", id: nextId(), text: RUN_FAILED });
+      failed = true;
     } finally {
-      if (!finished) history.current = sent;
+      if (!finished) {
+        history.current = sent;
+        // The stream ended with no stop reason (the host's connection may have dropped). Say so.
+        if (!failed) failed = true;
+      }
+      if (failed) add({ kind: "notice", id: nextId(), text: RUN_FAILED });
       // A prompt or a card that the run left open can never finish. Say so.
       setItems((current) =>
         current.map((item) => {
+          if (item.kind === "assistant" && item.streaming) return { ...item, streaming: false };
           if (item.kind === "approval" && item.status === "pending") return { ...item, status: "expired", busy: false };
           if (item.kind === "tool" && (item.status === "running" || item.status === "waiting")) return { ...item, status: "not_run" };
           return item;

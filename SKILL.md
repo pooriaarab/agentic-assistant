@@ -27,6 +27,14 @@ registry.registerAll(mcp.tools);
 
 Give each tool a `risk`. Pass `approvals: new QueueApprovalGate()` to `runAssistant`. On an `approval_request` event, show the exact arguments. Then call `approve(id, personId)` or `reject(id, personId)`.
 
+## Use the CLI
+
+```sh
+agentic-assistant chat --tools <mcp-url> --scope notes:read --tool-scope notes:read --tool-risk safe --json "message"
+```
+
+Set the key in the environment. Approve one exact risky call with `--approve-call`. Read the exit code: 0 normal, 1 stopped or failed, 2 usage.
+
 ## Show a panel
 
 ```tsx
