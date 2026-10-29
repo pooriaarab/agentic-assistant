@@ -76,7 +76,7 @@ export type AssistantEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown; actor: Actor }
   | { type: "approval_request"; request: ApprovalRequest }
-  | { type: "approval_decision"; requestId: string; approved: boolean; decidedBy?: string; reason?: string }
+  | { type: "approval_decision"; requestId: string; approved: boolean; /** True only when the approver said no. A timeout or a gate failure is not a decline. */ declined: boolean; decidedBy?: string; reason?: string }
   | {
       type: "tool_result";
       id: string;
@@ -443,13 +443,17 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
     let why: string | undefined;
     let decidedBy: string | undefined;
     let declineReason: string | undefined;
+    let declined = false;
     try {
       yield { type: "approval_request", request };
       try {
         const decision = await waiting.promise;
         why = refuseDecision(decision, request, principal.id);
         if (typeof decision.decidedBy === "string") decidedBy = decision.decidedBy;
-        if (decision.approved === false && typeof decision.reason === "string") declineReason = decision.reason;
+        if (decision.approved === false) {
+          declined = true;
+          if (typeof decision.reason === "string") declineReason = decision.reason;
+        }
       } catch (error) {
         why = `the approval failed: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -462,6 +466,7 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
       type: "approval_decision",
       requestId: request.id,
       approved: why === undefined,
+      declined,
       decidedBy: decidedBy?.slice(0, MAX_APPROVER_TEXT),
       reason: why?.slice(0, MAX_APPROVER_TEXT),
     };

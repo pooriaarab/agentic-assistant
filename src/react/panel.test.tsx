@@ -239,6 +239,32 @@ describe("assistant panel", () => {
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  test("a cut-off answer is not left marked as busy, and a stream with no end says so", async () => {
+    const feed = new Feed();
+    const user = userEvent.setup();
+    const { container } = render(<AssistantPanel run={() => feed} decide={noDecide} />);
+    await user.type(composer(), "go{Enter}");
+    feed.push({ type: "turn_start", turn: 1 });
+    feed.push({ type: "text_delta", text: "Here is" });
+    await screen.findByText("Here is");
+    expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("true");
+    feed.end();
+    expect(await screen.findByText(/could not finish/)).toBeTruthy();
+    expect(container.querySelector(".aa-assistant")?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  test("a decision that is not a clear yes or no is not shown as a decline", async () => {
+    const gate = { request: async (request: { id: string }) => ({ requestId: request.id, approved: undefined }) as never };
+    const registry = new ToolRegistry().register({ name: "notes_write", description: "d", inputSchema: { type: "object" }, scope: "notes:write", risk: "risky", handler: () => "ran" });
+    const provider = new ScriptedProvider([{ toolCalls: [{ name: "notes_write", input: {} }] }, { text: "ok" }]);
+    const principal = createPrincipal({ id: "agent:a1", kind: "agent_of_human", parentId: "human:alice", scopes: ["notes:write"] });
+    const user = userEvent.setup();
+    render(<AssistantPanel run={(messages, signal) => runAssistant({ provider, registry, principal, messages, approvals: gate, signal })} decide={noDecide} />);
+    await user.type(composer(), "go{Enter}");
+    expect(await screen.findByText(/Not approved\. The approval did not complete/)).toBeTruthy();
+    expect(screen.queryByText("Declined")).toBeNull();
+  });
+
   test("a cap or an error stop shows a notice in plain words", async () => {
     const run = () => (async function* () { yield done("max_turns"); })();
     const user = userEvent.setup();
