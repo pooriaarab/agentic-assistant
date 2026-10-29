@@ -27,6 +27,15 @@ registry.registerAll(mcp.tools);
 
 Give each tool a `risk`. Pass `approvals: new QueueApprovalGate()` to `runAssistant`. On an `approval_request` event, show the exact arguments. Then call `approve(id, personId)` or `reject(id, personId)`.
 
+## Serve the HTTP API
+
+```ts
+import { createWorker } from "agentic-assistant/worker";
+const worker = createWorker({ auth, registry, provider: () => model });
+```
+
+Routes: `GET /api/v1/tools`, `POST /api/v1/chat` (server-sent events), `GET /api/v1/approvals`, `POST /api/v1/approvals/:id/approve` with the digest, and `/deny`. The caller that asked for a turn never decides on it, if it is an agent.
+
 ## Use the CLI
 
 ```sh
