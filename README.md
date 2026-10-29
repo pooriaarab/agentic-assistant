@@ -7,8 +7,8 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: early. The core loop, the tool sources, and approvals work. It is not on npm yet.
-> The React panel and the chat CLI are not built yet.
+> Status: early. The core loop, the tool sources, approvals, and the React panel work. It is not on npm yet.
+> The chat CLI is not built yet.
 
 ## Install
 
@@ -86,13 +86,33 @@ const approvals = new QueueApprovalGate();
 for await (const event of runAssistant({ provider, registry, principal, messages, approvals })) {
   if (event.type === "approval_request") {
     showToPerson(event.request); // tool, risk, exact arguments
-    // later, when the person clicks: approvals.approve(event.request.id, "user-42")
-    //                           or:   approvals.reject(event.request.id, "user-42", "not now")
+    // when the person clicks, from any handler:
+    //   approvals.approve(event.request.id, "user-42")
+    //   approvals.reject(event.request.id, "user-42", "not now")
   }
 }
 ```
 
 An approval covers one request: the tool, the exact arguments, and the acting principal. The request carries a digest of those three. The decision must return the same digest, or the call is refused. The tool runs on a copy of the exact arguments the person saw, so a change to the original object cannot reach it. The agent cannot approve its own action. A gate that fails, a missed deadline (`approvalTimeoutMs`, default five minutes), or a wrong answer means the call is refused. To connect your own approval service, implement `ApprovalGate`: one method that returns a decision.
+
+## Add the side panel
+
+```tsx
+import { AssistantPanel } from "agentic-assistant/react";
+import "agentic-assistant/react.css";
+
+<AssistantPanel
+  title="Notes assistant"
+  // Run the assistant where your app wants: in the page, or behind your own HTTP stream.
+  run={(messages, signal) => runAssistant({ provider, registry, principal, messages, approvals, signal })}
+  // Pass a person's choice to your approval gate. Your app knows who the person is.
+  decide={(id, approved, reason) => (approved ? approvals.approve(id, userId) : approvals.reject(id, userId, reason))}
+/>;
+```
+
+The panel streams the answer, shows each tool call as a card, and shows an approval prompt with the exact arguments. Every message, card, and prompt that the assistant makes carries a visible "Machine-made" label. Tool output is shown as text and never as HTML. The panel does not hold a model, a key, or a gate. It needs `react` 18 or newer.
+
+The look comes from plain CSS variables (`--aa-bg`, `--aa-fg`, `--aa-accent`, and others). Set them on `.aa-panel` or a parent. The sheet loads no font, image, or file from another host. A prompt that the run left open (after Stop or an error) is closed and marked expired. Closing the panel stops the run.
 
 ## Features
 
@@ -102,6 +122,7 @@ An approval covers one request: the tool, the exact arguments, and the acting pr
 - **Input validation.** The loop checks each call against the tool's JSON Schema before the handler runs. Nothing is coerced. A bad call returns an error to the model and never reaches the tool.
 - **Tool output is data.** Each result is quoted in `<tool_output>` tags. Every `<` in the output is escaped. Every request carries a notice that tool output is never an instruction. This lowers the risk of prompt injection. It does not remove it: keep tools narrow and scopes small.
 - **Approvals.** Every tool has a required `risk`: `safe`, `risky`, or `irreversible`. The loop asks the `ApprovalGate` before a risky or irreversible call. With no gate, those tools are not offered and are refused. The text a person writes when they decline goes to the event, not to the model.
+- **React panel.** `agentic-assistant/react` has `AssistantPanel` and `useAssistant`. It meets the WCAG 2.2 AA points that code can check: named controls, a live conversation log, keyboard use, focus that moves to an approval prompt and then to the message box, buttons that are at least 32 px, a visible focus ring, and a color palette checked for contrast.
 - **Fixed principal.** The assistant always acts as `agent_of_human`. `createPrincipal` throws when the kind is missing or different.
 - **Caps.** A max-turn cap, a total-token cap, and a cost cap. A cap that trips stops the run. No tool runs after that. A tool result is cut at `maxToolResultChars`. A request that is sure to pass the token cap is not sent. The cost cap also limits the output of each request. A turn with more than `maxToolCallsPerTurn` calls (default 16) runs none of them.
 - **Stops that fail closed.** An expired or revoked principal stops the run. So does a revocation check that throws or returns anything but `false`. The loop checks the principal again at the start of each run. A provider error ends the run with `reason: "provider_error"` and keeps the transcript. Truncated or refused model output never runs its tool calls.
@@ -110,8 +131,9 @@ An approval covers one request: the tool, the exact arguments, and the acting pr
 
 ## Limits
 
+- The panel is tested in a simulated browser (jsdom). Contrast is checked from the CSS values. Run a screen reader and a real browser before you ship it to people who need it.
+- The panel shows plain text, not Markdown.
 - The gate trusts the name that `decidedBy` carries. Your gate must check who the person is. `QueueApprovalGate` does not.
-- `agentic-approve` is a review queue for drafts. It cannot bind an approval to a call or wait for an answer, so this package does not use it. An adapter that wraps it is possible.
 - An MCP server is trusted for its own output only. The assistant does not sandbox the server process. Run stdio servers you trust.
 - Token and cost caps need the provider to report usage. The OpenAI-compatible adapter throws when the server sends none.
 - A cost is an estimate from the `pricing` you give. Cache discounts are not applied. The built-in Anthropic prices are from 2026-10-06. Check them.

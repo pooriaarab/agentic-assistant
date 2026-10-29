@@ -234,7 +234,13 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
       .list()
       .filter((tool) => hasScope(principal.scopes, tool.scope) && (tool.risk === "safe" || options.approvals !== undefined))
       .map(toToolSpec);
-    const estimatedInput = Math.ceil(JSON.stringify({ system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
+    let estimatedInput: number;
+    try {
+      estimatedInput = Math.ceil(JSON.stringify({ system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
+    } catch {
+      yield finish("provider_error", "the conversation is too deeply nested to send");
+      return;
+    }
     // The most output this request may use, and the cap that sets it.
     let room = limits.maxOutput;
     let limitedBy: DoneReason = "token_cap";
@@ -366,26 +372,39 @@ interface Outcome {
 }
 
 /** Asks the gate and waits. A failure or a missed deadline is an error, and the caller refuses the call. */
-async function awaitDecision(gate: ApprovalGate, request: ApprovalRequest, parent: AbortSignal | undefined, ms: number): Promise<ApprovalDecision> {
+function startDecision(
+  gate: ApprovalGate,
+  request: ApprovalRequest,
+  parent: AbortSignal | undefined,
+  ms: number,
+): { promise: Promise<ApprovalDecision>; cancel(): void } {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
-  if (parent?.aborted) throw new Error("the run was aborted");
-  parent?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await Promise.race([
-      gate.request(request, controller.signal),
-      new Promise<never>((_, reject) => {
-        const stop = () => reject(new Error("no decision before the deadline"));
-        // The gate may have aborted already, while it was being called.
-        if (controller.signal.aborted) stop();
-        else controller.signal.addEventListener("abort", stop, { once: true });
-      }),
-    ]);
-  } finally {
+  const cancel = () => {
     clearTimeout(timer);
     parent?.removeEventListener("abort", onAbort);
-  }
+    controller.abort();
+  };
+  const promise = (async () => {
+    if (parent?.aborted) throw new Error("the run was aborted");
+    parent?.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await Promise.race([
+        gate.request(request, controller.signal),
+        new Promise<never>((_, reject) => {
+          const stop = () => reject(new Error("no decision before the deadline"));
+          // The gate may have aborted already, while it was being called.
+          if (controller.signal.aborted) stop();
+          else controller.signal.addEventListener("abort", stop, { once: true });
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", onAbort);
+    }
+  })();
+  return { promise, cancel };
 }
 
 async function* runCall(ctx: CallContext, call: { id: string; name: string; input: unknown }): AsyncGenerator<AssistantEvent, Outcome> {
@@ -401,39 +420,53 @@ async function* runCall(ctx: CallContext, call: { id: string; name: string; inpu
   if (problem !== undefined) return refuse(`input does not match the tool schema: ${problem}`, "invalid_input");
   // One frozen copy, taken now. The model call, the event consumer, and the approver can all hold the
   // original object. The tool runs on a copy of this one, so it gets exactly what the person approved.
-  const approved = deepFreeze(structuredClone(call.input));
+  let approved: Record<string, unknown>;
+  try {
+    approved = deepFreeze(structuredClone(call.input));
+  } catch {
+    return refuse("tool input is nested too deeply", "invalid_input");
+  }
 
   if (tool.risk !== "safe") {
     if (ctx.gate === undefined) return refuse(`denied: "${tool.name}" needs a person's approval, and none is set up`, "approval");
-    const request: ApprovalRequest = {
+    const request: ApprovalRequest = deepFreeze({
       id: newApprovalId(),
       tool: tool.name,
       risk: tool.risk,
       input: approved,
       digest: digestCall({ tool: tool.name, input: approved, principalId: principal.id, onBehalfOf: principal.parentId }),
       actor: ctx.actor,
-    };
-    yield { type: "approval_request", request };
-    if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
-    let decision: ApprovalDecision | undefined;
-    let failure: string | undefined;
+    });
+    // The gate gets the request before the event is shown, so a consumer can decide in the loop body.
+    const waiting = startDecision(ctx.gate, request, signal, ctx.limits.approvalTimeoutMs);
+    waiting.promise.catch(() => undefined);
+    let why: string | undefined;
+    let decidedBy: string | undefined;
+    let declineReason: string | undefined;
     try {
-      decision = await awaitDecision(ctx.gate, request, signal, ctx.limits.approvalTimeoutMs);
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
+      yield { type: "approval_request", request };
+      try {
+        const decision = await waiting.promise;
+        why = refuseDecision(decision, request, principal.id);
+        if (typeof decision.decidedBy === "string") decidedBy = decision.decidedBy;
+        if (decision.approved === false && typeof decision.reason === "string") declineReason = decision.reason;
+      } catch (error) {
+        why = `the approval failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } finally {
+      // If the consumer stops reading at the request, the gate must not keep it pending.
+      waiting.cancel();
     }
     if (signal?.aborted) return { ...refuse("", "approval"), stop: "aborted" };
-    const why = failure !== undefined ? `the approval failed: ${failure}` : refuseDecision(decision, request, principal.id);
-    const declined = decision !== undefined && (decision as { approved?: unknown }).approved === false;
     yield {
       type: "approval_decision",
       requestId: request.id,
       approved: why === undefined,
-      decidedBy: typeof decision?.decidedBy === "string" ? decision.decidedBy.slice(0, MAX_APPROVER_TEXT) : undefined,
-      reason: why === undefined ? undefined : why.slice(0, MAX_APPROVER_TEXT),
+      decidedBy: decidedBy?.slice(0, MAX_APPROVER_TEXT),
+      reason: why?.slice(0, MAX_APPROVER_TEXT),
     };
     if (why !== undefined) {
-      const detail = (declined && typeof (decision as { reason?: unknown }).reason === "string" ? `${why}: ${(decision as { reason: string }).reason}` : why).slice(0, MAX_APPROVER_TEXT);
+      const detail = (declineReason === undefined ? why : `${why}: ${declineReason}`).slice(0, MAX_APPROVER_TEXT);
       return refuse("denied: a person did not approve this action", "approval", detail);
     }
     // The person may have taken a while. The principal must still be valid.

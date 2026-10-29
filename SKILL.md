@@ -27,6 +27,14 @@ registry.registerAll(mcp.tools);
 
 Give each tool a `risk`. Pass `approvals: new QueueApprovalGate()` to `runAssistant`. On an `approval_request` event, show the exact arguments. Then call `approve(id, personId)` or `reject(id, personId)`.
 
+## Show a panel
+
+```tsx
+<AssistantPanel run={(messages, signal) => runAssistant({ ...options, messages, signal })} decide={(id, ok) => (ok ? gate.approve(id, userId) : gate.reject(id, userId))} />
+```
+
+Import `agentic-assistant/react.css` too. Label every assistant part as machine-made.
+
 ## Test without a model
 
 Use `ScriptedProvider` from `agentic-assistant/testing`. Give it one scripted turn per model call.

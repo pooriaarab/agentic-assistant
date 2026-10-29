@@ -6,10 +6,17 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/testing.ts", "src/cli.ts", "src/worker.ts"],
+  entry: {
+    index: "src/index.ts",
+    testing: "src/testing.ts",
+    cli: "src/cli.ts",
+    worker: "src/worker.ts",
+    react: "src/react/index.ts",
+  },
   format: ["esm"],
   dts: true,
   clean: true,
+  onSuccess: "cp src/react/panel.css dist/react.css",
   define: {
     __PACK_VERSION__: JSON.stringify(pkg.version),
   },
