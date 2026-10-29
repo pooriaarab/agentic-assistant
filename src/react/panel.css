@@ -1,19 +1,22 @@
-/* Plain CSS variables. Set them on .aa-panel or a parent to match your app. Every pair below meets
-   WCAG 2.2 AA contrast; src/react/styles.test.ts checks it. No remote fonts or images. */
+/* Plain CSS variables. They read the agentic-design tokens (--ad-color-*), so load
+   agentic-design/tokens.css once on the page. Override --aa-* on .aa-panel or a parent to match your app.
+   Without the tokens, each variable falls back to a system color, so focus and borders stay visible.
+   Every token pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks it.
+   No remote fonts or images. */
 .aa-panel {
-  --aa-bg: #ffffff;
-  --aa-fg: #1b1b1b;
-  --aa-muted: #4d4d4d;
-  --aa-border: #767676;
-  --aa-accent: #0b57d0;
-  --aa-accent-fg: #ffffff;
-  --aa-focus: #0b57d0;
-  --aa-machine-bg: #e8eefc;
-  --aa-machine-fg: #0a2a6b;
-  --aa-card-bg: #f4f4f4;
-  --aa-warn-bg: #fff4d6;
-  --aa-warn-fg: #5c3d00;
-  --aa-danger: #b3261e;
+  --aa-bg: var(--ad-color-surface, Canvas);
+  --aa-fg: var(--ad-color-text, CanvasText);
+  --aa-muted: var(--ad-color-text-muted, CanvasText);
+  --aa-border: var(--ad-color-border-strong, CanvasText);
+  --aa-accent: var(--ad-color-accent, LinkText);
+  --aa-accent-fg: var(--ad-color-text-on-accent, Canvas);
+  --aa-focus: var(--ad-color-focus, LinkText);
+  --aa-machine-bg: var(--ad-color-accent-subtle, Canvas);
+  --aa-machine-fg: var(--ad-color-accent-text, CanvasText);
+  --aa-card-bg: var(--ad-color-surface-sunken, Canvas);
+  --aa-warn-bg: var(--ad-color-warning-subtle, Canvas);
+  --aa-warn-fg: var(--ad-color-warning-text, CanvasText);
+  --aa-danger: var(--ad-color-danger, LinkText);
 
   display: flex;
   flex-direction: column;

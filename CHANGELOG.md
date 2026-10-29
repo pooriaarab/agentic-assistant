@@ -7,6 +7,10 @@ Added
 - CLI commands `tools`, `approvals`, `approve <id> --digest <d>`, and `deny <id>`. They call a running assistant API with `--api <url>` and `--api-token-env <NAME>`.
 - With those flags, `agentic-assistant mcp` also serves `assistant_tools`, `assistant_approvals`, and `assistant_deny`. `--allow-approve` adds `assistant_approve`.
 
+Changed
+
+- `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color, and the panel loses its blue accent, tinted cards, amber approval box, and red danger color (the risk notice shows in link blue). The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
+
 ## 0.4.0
 
 Added
