@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Changed
+
+- The package needs Node.js 22 or newer. `agentic-identity` needs Node 22, so `engines.node` is now `>=22`. It was `>=18`.
+
 ## 0.2.0
 
 Added

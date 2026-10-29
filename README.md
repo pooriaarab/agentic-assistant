@@ -16,7 +16,7 @@ An AI assistant that acts inside your apps with the user's own permissions.
 npm install agentic-assistant
 ```
 
-You need Node.js 18 or newer. The React panel needs `react` 18 or newer.
+You need Node.js 22 or newer. The React panel needs `react` 18 or newer.
 
 To build from source:
 
