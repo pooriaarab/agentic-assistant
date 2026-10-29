@@ -1,21 +1,22 @@
 /* Plain CSS variables. They read the agentic-design tokens (--ad-color-*), so load
    agentic-design/tokens.css once on the page. Override --aa-* on .aa-panel or a parent to match your app.
-   Every pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks it.
+   Without the tokens, each variable falls back to a system color, so focus and borders stay visible.
+   Every token pair meets WCAG 2.2 AA contrast in light and dark; src/react/styles.test.ts checks it.
    No remote fonts or images. */
 .aa-panel {
-  --aa-bg: var(--ad-color-surface);
-  --aa-fg: var(--ad-color-text);
-  --aa-muted: var(--ad-color-text-muted);
-  --aa-border: var(--ad-color-border-strong);
-  --aa-accent: var(--ad-color-accent);
-  --aa-accent-fg: var(--ad-color-text-on-accent);
-  --aa-focus: var(--ad-color-focus);
-  --aa-machine-bg: var(--ad-color-accent-subtle);
-  --aa-machine-fg: var(--ad-color-accent-text);
-  --aa-card-bg: var(--ad-color-surface-sunken);
-  --aa-warn-bg: var(--ad-color-warning-subtle);
-  --aa-warn-fg: var(--ad-color-warning-text);
-  --aa-danger: var(--ad-color-danger);
+  --aa-bg: var(--ad-color-surface, Canvas);
+  --aa-fg: var(--ad-color-text, CanvasText);
+  --aa-muted: var(--ad-color-text-muted, GrayText);
+  --aa-border: var(--ad-color-border-strong, GrayText);
+  --aa-accent: var(--ad-color-accent, LinkText);
+  --aa-accent-fg: var(--ad-color-text-on-accent, Canvas);
+  --aa-focus: var(--ad-color-focus, Highlight);
+  --aa-machine-bg: var(--ad-color-accent-subtle, Canvas);
+  --aa-machine-fg: var(--ad-color-accent-text, CanvasText);
+  --aa-card-bg: var(--ad-color-surface-sunken, Canvas);
+  --aa-warn-bg: var(--ad-color-warning-subtle, Canvas);
+  --aa-warn-fg: var(--ad-color-warning-text, CanvasText);
+  --aa-danger: var(--ad-color-danger, CanvasText);
 
   display: flex;
   flex-direction: column;

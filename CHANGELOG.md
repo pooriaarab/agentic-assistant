@@ -9,7 +9,7 @@ Added
 
 Changed
 
-- `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. `agentic-design` is an optional peer dependency.
+- `react.css` has no hex colors. Its `--aa-*` variables read the `agentic-design` tokens (`--ad-color-*`), so the panel follows the host theme, including dark mode. Load `agentic-design/tokens.css` on the page. Without it each variable falls back to a system color. The palette shifts a little (for example the accent is now `#2B4BC4`). `agentic-design` is an optional peer dependency (`^0.3.1`).
 
 ## 0.4.0
 

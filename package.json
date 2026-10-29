@@ -94,7 +94,7 @@
     "wrangler": "^4.155.0"
   },
   "peerDependencies": {
-    "agentic-design": ">=0.3.1",
+    "agentic-design": "^0.3.1",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
