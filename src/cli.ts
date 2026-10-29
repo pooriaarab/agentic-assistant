@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { TOOL_RISKS, type ToolRisk } from "./approvals.js";
 import { ConfigError, buildSetup, readTextFile, runChat, type ChatConfig, type ChatIo, type Setup } from "./chat.js";
 import type { AssistantEvent, RunLimits } from "./loop.js";
+import { printable } from "./text.js";
 import type { Message, Pricing } from "./types.js";
 import { VERSION } from "./version.js";
 
@@ -198,16 +199,6 @@ function defaultIo(): CliIo {
     },
   };
 }
-
-/**
- * Text from a model, a tool, or a server can hold control characters. A terminal reads them as commands
- * (clear the screen, set the title). Drop them all, except a line break and a tab. A bare carriage
- * return would let text overwrite the line, so it goes too. Text direction marks and zero-width
- * characters go as well: they can make an argument read differently from what runs.
- */
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
-export const printable = (text: string): string => text.replace(CONTROL, "");
 
 const oneLine = (value: unknown, max = 200): string => {
   const text = printable(typeof value === "string" ? value : JSON.stringify(value) ?? "null").replace(/\s+/g, " ");
