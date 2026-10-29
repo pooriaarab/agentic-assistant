@@ -4,8 +4,8 @@
 
 Changed
 
-- The chat panel has the agentic-design 0.5 calm look: soft borders on cards and messages, a strong edge only on the text field and buttons, the `--agd-*` space, radius, type scale, control-size, and shadow tokens (each with a fallback), a 2px focus ring (was 3px), and a dashed edge on a disabled button.
-- BREAKING: panel class names use the `agd-` prefix. Your `.aa-*` overrides stop applying without an error. Migration: `.aa-panel` is now `.agd-assistant`, and each part is `.agd-assistant__<part>` (`.aa-button` is `.agd-assistant__button`, `.aa-primary` is `.agd-assistant__primary`). Rename any override in your own CSS. The `--aa-*` variables keep their names. A new `--aa-edge` variable sets the strong edge, and `--aa-border` is now the soft border.
+- The chat panel has the agentic-design 0.5 calm look: soft borders on cards and messages, and a strong edge on the text field, buttons, approval prompt, and warnings, the `--agd-*` space, radius, type scale, control-size, and shadow tokens (each with a fallback), a 2px focus ring (was 3px), and a dashed edge on a disabled button.
+- BREAKING: panel class names use the `agd-` prefix. Your `.aa-*` overrides stop applying without an error. Migration: `.aa-panel` is now `.agd-assistant`, and each part is `.agd-assistant__<part>` (`.aa-button` is `.agd-assistant__button`, `.aa-primary` is `.agd-assistant__primary`). Rename any override in your own CSS. The `--aa-*` variables keep their names. New variables: `--aa-edge` sets the strong edge, `--aa-border` is now the soft border, and `--aa-hover-bg`, `--aa-accent-hover`, and `--aa-shadow` set the hover and shadow. If you override `--aa-bg` or `--aa-accent`, also set `--aa-hover-bg` and `--aa-accent-hover`, so hover text stays readable.
 - The label on every part the assistant makes reads "AI-generated" (it read "Machine-made"). It stays visible and is real text, so a screen reader reads it. The `data-machine-made` attribute does not change.
 
 ## 0.6.1

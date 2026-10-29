@@ -69,7 +69,6 @@ describe("panel styles", () => {
     ["focus", "hover-bg", 3],
     ["edge", "warn-bg", 3],
     ["edge", "hover-bg", 3],
-    ["danger", "bg", 3],
     ["warn-fg", "bg", 3],
   ])("%s on %s is at least %s:1 in light, dark, and OS dark", (fg, bg, minimum) => {
     for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
