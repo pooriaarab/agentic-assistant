@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { checkBaseUrl } from "./url.js";
 import {
   ProviderError,
   type ContentBlock,
@@ -12,7 +13,8 @@ import {
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
 
-// US dollars per million tokens. Override with the `pricing` option.
+// US dollars per million tokens, from the published model table of 2026-10-06. Check them
+// before you trust a cost cap, or pass the `pricing` option.
 const KNOWN_PRICING: Record<string, Pricing> = {
   "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20 },
@@ -22,8 +24,10 @@ const KNOWN_PRICING: Record<string, Pricing> = {
 export interface AnthropicProviderOptions {
   /** Read from ANTHROPIC_API_KEY when absent. */
   apiKey?: string;
-  /** Point at a gateway or an EU-hosted Anthropic endpoint. */
+  /** Point at a gateway or an EU-hosted Anthropic endpoint. Required unless `useDefaultEndpoint` is true. */
   baseUrl?: string;
+  /** Opt in to api.anthropic.com, a US-hosted endpoint. Without it, `baseUrl` is required. */
+  useDefaultEndpoint?: boolean;
   model?: string;
   pricing?: Pricing;
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
@@ -75,8 +79,17 @@ export class AnthropicProvider implements ModelProvider {
     this.model = options.model ?? DEFAULT_ANTHROPIC_MODEL;
     this.pricing = options.pricing ?? KNOWN_PRICING[this.model];
     this.effort = options.effort;
-    this.client =
-      options.client ?? new Anthropic({ apiKey: options.apiKey, baseURL: options.baseUrl });
+    if (options.client !== undefined) {
+      this.client = options.client;
+      return;
+    }
+    if (options.baseUrl === undefined && options.useDefaultEndpoint !== true) {
+      throw new ProviderError("set baseUrl, or set useDefaultEndpoint: true to call api.anthropic.com, a US-hosted endpoint");
+    }
+    this.client = new Anthropic({
+      apiKey: options.apiKey,
+      ...(options.baseUrl !== undefined ? { baseURL: checkBaseUrl(options.baseUrl).text } : {}),
+    });
   }
 
   async *stream(request: ModelRequest): AsyncGenerator<ModelEvent> {

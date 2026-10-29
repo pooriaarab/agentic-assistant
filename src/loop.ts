@@ -1,4 +1,4 @@
-import { actorOf, type Actor, type AssistantPrincipal } from "./principal.js";
+import { actorOf, assertPrincipal, type Actor, type AssistantPrincipal } from "./principal.js";
 import { hasScope } from "./scopes.js";
 import { toToolSpec, type ToolRegistry } from "./tools.js";
 import {
@@ -19,6 +19,8 @@ export interface RunLimits {
   maxCostUsd?: number;
   /** Output token ceiling for one turn. Default 4096. */
   maxOutputTokensPerTurn?: number;
+  /** Longest tool result, in characters, sent to the model. Longer results are cut. Default 32768. */
+  maxToolResultChars?: number;
 }
 
 export interface RunOptions {
@@ -41,6 +43,7 @@ export type DoneReason =
   | "max_turns"
   | "token_cap"
   | "cost_cap"
+  | "provider_error"
   | "principal_inactive"
   | "aborted";
 
@@ -62,13 +65,18 @@ export type AssistantEvent =
       content: string;
       isError: boolean;
       denied?: DeniedReason;
+      /** The raw failure text. It stays in the event and never goes to the model. */
+      detail?: string;
       actor: Actor;
     }
   | { type: "turn_end"; turn: number; usage: Usage; totals: RunTotals }
-  | { type: "done"; reason: DoneReason; totals: RunTotals; actor: Actor; messages: Message[] };
+  | { type: "done"; reason: DoneReason; totals: RunTotals; actor: Actor; messages: Message[]; error?: string };
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+const DEFAULT_MAX_TOOL_RESULT_CHARS = 32_768;
+// A cautious guess of three characters per token, used only to refuse a request that is sure to pass the token cap.
+const CHARS_PER_TOKEN_ESTIMATE = 3;
 
 function positiveInteger(name: string, value: number | undefined, fallback?: number): number | undefined {
   if (value === undefined) return fallback;
@@ -80,6 +88,15 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
   const maxTurns = positiveInteger("maxTurns", limits.maxTurns, DEFAULT_MAX_TURNS) as number;
   const maxTotalTokens = positiveInteger("maxTotalTokens", limits.maxTotalTokens);
   const maxOutput = positiveInteger("maxOutputTokensPerTurn", limits.maxOutputTokensPerTurn, DEFAULT_MAX_OUTPUT_TOKENS) as number;
+  const maxToolResultChars = positiveInteger("maxToolResultChars", limits.maxToolResultChars, DEFAULT_MAX_TOOL_RESULT_CHARS) as number;
+  const prices = provider.pricing;
+  if (prices !== undefined) {
+    for (const price of [prices.inputPerMTok, prices.outputPerMTok]) {
+      if (typeof price !== "number" || !Number.isFinite(price) || price < 0) {
+        throw new RangeError(`provider "${provider.name}" has invalid pricing; prices must be finite numbers of 0 or more`);
+      }
+    }
+  }
   let maxCostUsd: number | undefined;
   if (limits.maxCostUsd !== undefined) {
     if (!Number.isFinite(limits.maxCostUsd) || limits.maxCostUsd <= 0) {
@@ -90,14 +107,14 @@ function validateLimits(limits: RunLimits, provider: ModelProvider) {
     }
     maxCostUsd = limits.maxCostUsd;
   }
-  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd };
+  return { maxTurns, maxTotalTokens, maxOutput, maxCostUsd, maxToolResultChars };
 }
 
 async function principalActive(principal: AssistantPrincipal, now: number): Promise<boolean> {
   if (principal.expiresAt !== undefined && !(now < principal.expiresAt)) return false;
   if (principal.isRevoked === undefined) return true;
   try {
-    return !(await principal.isRevoked());
+    return (await principal.isRevoked()) === false;
   } catch {
     return false;
   }
@@ -114,6 +131,11 @@ function checkUsage(usage: Usage): void {
 function serialize(value: unknown): string {
   if (typeof value === "string") return value;
   return JSON.stringify(value) ?? "null";
+}
+
+function limitText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n[truncated: ${text.length - max} characters omitted]`;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -134,17 +156,19 @@ const DONE_FOR_STOP: Record<Exclude<StopReason, "tool_use">, DoneReason> = {
  */
 export async function* runAssistant(options: RunOptions): AsyncGenerator<AssistantEvent> {
   const { provider, registry, principal, signal } = options;
+  assertPrincipal(principal);
   const limits = validateLimits(options.limits ?? {}, provider);
   const now = options.now ?? Date.now;
   const actor = actorOf(principal);
   const messages: Message[] = [...options.messages];
   const totals: RunTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-  const finish = (reason: DoneReason): AssistantEvent => ({
+  const finish = (reason: DoneReason, error?: string): AssistantEvent => ({
     type: "done",
     reason,
     totals: { ...totals },
     actor,
     messages: [...messages],
+    ...(error !== undefined ? { error } : {}),
   });
   const capReason = (): DoneReason | undefined => {
     if (limits.maxTotalTokens !== undefined && totals.inputTokens + totals.outputTokens >= limits.maxTotalTokens) {
@@ -179,7 +203,14 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
     const tokenRoom =
       limits.maxTotalTokens === undefined
         ? Number.POSITIVE_INFINITY
-        : limits.maxTotalTokens - totals.inputTokens - totals.outputTokens;
+        : limits.maxTotalTokens -
+          totals.inputTokens -
+          totals.outputTokens -
+          Math.ceil(JSON.stringify({ system: options.system, messages, tools }).length / CHARS_PER_TOKEN_ESTIMATE);
+    if (tokenRoom <= 0) {
+      yield finish("token_cap");
+      return;
+    }
     let final: { content: ContentBlock[]; stopReason: StopReason; usage: Usage } | undefined;
     try {
       for await (const event of provider.stream({
@@ -192,15 +223,16 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         if (event.type === "text_delta") yield event;
         else final = event;
       }
+      if (final === undefined) throw new ProviderError(`provider "${provider.name}" ended without a final message`);
+      checkUsage(final.usage);
     } catch (error) {
       if (signal?.aborted) {
         yield finish("aborted");
         return;
       }
-      throw error;
+      yield finish("provider_error", error instanceof Error ? error.message : String(error));
+      return;
     }
-    if (final === undefined) throw new ProviderError(`provider "${provider.name}" ended without a final message`);
-    checkUsage(final.usage);
     totals.inputTokens += final.usage.inputTokens;
     totals.outputTokens += final.usage.outputTokens;
     if (provider.pricing !== undefined) {
@@ -242,7 +274,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         return;
       }
       yield { type: "tool_call", id: call.id, name: call.name, input: call.input, actor };
-      const outcome = await dispatch(registry, principal, call, signal);
+      const outcome = await dispatch(registry, principal, call, signal, limits.maxToolResultChars);
       results.push({ type: "tool_result", toolUseId: call.id, content: outcome.content, isError: outcome.isError });
       yield {
         type: "tool_result",
@@ -251,6 +283,7 @@ export async function* runAssistant(options: RunOptions): AsyncGenerator<Assista
         content: outcome.content,
         isError: outcome.isError,
         denied: outcome.denied,
+        detail: outcome.detail,
         actor,
       };
     }
@@ -263,7 +296,8 @@ async function dispatch(
   principal: AssistantPrincipal,
   call: { id: string; name: string; input: unknown },
   signal: AbortSignal | undefined,
-): Promise<{ content: string; isError: boolean; denied?: DeniedReason }> {
+  maxChars: number,
+): Promise<{ content: string; isError: boolean; denied?: DeniedReason; detail?: string }> {
   const tool = registry.get(call.name);
   if (tool === undefined) {
     return { content: `unknown tool "${call.name}"`, isError: true, denied: "unknown_tool" };
@@ -280,8 +314,8 @@ async function dispatch(
   }
   try {
     const value = await tool.handler(call.input, { principal, toolUseId: call.id, signal });
-    return { content: serialize(value), isError: false };
+    return { content: limitText(serialize(value), maxChars), isError: false };
   } catch (error) {
-    return { content: `tool failed: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+    return { content: "tool failed", isError: true, detail: error instanceof Error ? error.message : String(error) };
   }
 }

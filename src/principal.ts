@@ -33,13 +33,13 @@ export class PrincipalError extends Error {
   }
 }
 
-/** Validates host input. A missing or other kind is an error, never a default. */
-export function createPrincipal(input: PrincipalInput): AssistantPrincipal {
+function validate(input: Partial<Record<keyof PrincipalInput, unknown>>): void {
   if (input.kind !== "agent_of_human") {
     throw new PrincipalError(`principal kind must be "agent_of_human", got ${JSON.stringify(input.kind)}`);
   }
   for (const field of ["id", "parentId"] as const) {
-    if (typeof input[field] !== "string" || input[field].length === 0) {
+    const value = input[field];
+    if (typeof value !== "string" || value.length === 0) {
       throw new PrincipalError(`principal ${field} must be a non-empty string`);
     }
   }
@@ -51,9 +51,17 @@ export function createPrincipal(input: PrincipalInput): AssistantPrincipal {
       throw new PrincipalError(error instanceof Error ? error.message : String(error));
     }
   }
-  if (input.expiresAt !== undefined && !Number.isFinite(input.expiresAt)) {
+  if (input.expiresAt !== undefined && !(typeof input.expiresAt === "number" && Number.isFinite(input.expiresAt))) {
     throw new PrincipalError("principal expiresAt must be a finite number of epoch milliseconds");
   }
+  if (input.isRevoked !== undefined && typeof input.isRevoked !== "function") {
+    throw new PrincipalError("principal isRevoked must be a function");
+  }
+}
+
+/** Validates host input. A missing or other kind is an error, never a default. */
+export function createPrincipal(input: PrincipalInput): AssistantPrincipal {
+  validate(input);
   return Object.freeze({
     id: input.id,
     kind: "agent_of_human",
@@ -62,6 +70,11 @@ export function createPrincipal(input: PrincipalInput): AssistantPrincipal {
     expiresAt: input.expiresAt,
     isRevoked: input.isRevoked,
   });
+}
+
+/** Re-checks a principal at the start of a run. A cast or a plain JS caller cannot skip validation. */
+export function assertPrincipal(principal: AssistantPrincipal): void {
+  validate(principal);
 }
 
 /** Who a run, a tool call, and every audit row is attributed to. Always machine-made. */
@@ -73,5 +86,5 @@ export interface Actor {
 }
 
 export function actorOf(principal: AssistantPrincipal): Actor {
-  return { principalId: principal.id, kind: principal.kind, onBehalfOf: principal.parentId, machineMade: true };
+  return { principalId: principal.id, kind: "agent_of_human", onBehalfOf: principal.parentId, machineMade: true };
 }

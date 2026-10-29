@@ -1,6 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
 import {
-  ProviderError,
   ToolRegistry,
   createPrincipal,
   PrincipalError,
@@ -136,7 +135,7 @@ describe("run loop", () => {
     const { read, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }] }, { text: "it failed" }], ["notes:read"]);
     read.mockRejectedValueOnce(new Error("disk full"));
     const events = await run();
-    expect(results(events)[0]).toMatchObject({ isError: true, content: "tool failed: disk full" });
+    expect(results(events)[0]).toMatchObject({ isError: true, content: "tool failed", detail: "disk full" });
     expect(done(events).reason).toBe("end_turn");
   });
 
@@ -163,12 +162,13 @@ describe("run loop", () => {
   });
 
   test("the token cap stops the run and trims the next request", async () => {
-    const turns = Array.from({ length: 5 }, () => ({ toolCalls: [{ name: "notes_read", input: {} }], usage: { inputTokens: 40, outputTokens: 20 } }));
-    const { read, provider, run } = setup(turns, ["notes:read"], { maxTotalTokens: 100 });
+    const turns = Array.from({ length: 5 }, () => ({ toolCalls: [{ name: "notes_read", input: {} }], usage: { inputTokens: 200, outputTokens: 100 } }));
+    const { read, provider, run } = setup(turns, ["notes:read"], { maxTotalTokens: 600 });
     const events = await run();
     expect(done(events).reason).toBe("token_cap");
     expect(read).toHaveBeenCalledTimes(1);
-    expect(provider.requests[1]?.maxOutputTokens).toBe(40);
+    expect(provider.requests[1]?.maxOutputTokens).toBeGreaterThan(0);
+    expect(provider.requests[1]?.maxOutputTokens).toBeLessThanOrEqual(300);
     expectEveryToolUseAnswered(done(events).messages);
   });
 
@@ -198,10 +198,113 @@ describe("run loop", () => {
     [{ inputTokens: Number.NaN, outputTokens: 1 }],
     [{ inputTokens: -5, outputTokens: 1 }],
     [{ inputTokens: 1.5, outputTokens: 1 }],
-  ])("bad usage %j is a provider error", async (usage) => {
-    const { read, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }], usage }], ["notes:read"], { maxTotalTokens: 10 });
-    await expect(run()).rejects.toThrow(ProviderError);
+  ])("bad usage %j ends the run with provider_error", async (usage) => {
+    const { read, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }], usage }], ["notes:read"], { maxTotalTokens: 10_000 });
+    const events = await run();
+    expect(done(events)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("token usage") });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  test("a provider failure keeps the transcript and the totals", async () => {
+    const { read, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }] }], ["notes:read"]);
+    const events = await run();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(done(events)).toMatchObject({ reason: "provider_error", totals: { inputTokens: 10, outputTokens: 5 } });
+    expect(done(events).messages).toHaveLength(3);
+  });
+
+  test.each([
+    ["NaN", { inputPerMTok: Number.NaN, outputPerMTok: 1 }],
+    ["negative", { inputPerMTok: -1, outputPerMTok: 1 }],
+    ["a string", { inputPerMTok: "2", outputPerMTok: 1 }],
+    ["Infinity", { inputPerMTok: 1, outputPerMTok: Number.POSITIVE_INFINITY }],
+  ])("%s pricing is refused", async (_name, pricing) => {
+    const { run } = setup([{ text: "hi" }], [], { maxCostUsd: 1 }, pricing as never);
+    await expect(run()).rejects.toThrow(/pricing/);
+  });
+
+  test.each([[undefined], [null], ["no"], [0]])("a revocation check that returns %j denies", async (value) => {
+    const { provider, registry } = setup([{ text: "hi" }], []);
+    const events = await collect(
+      runAssistant({ provider, registry, principal: principal(["notes:read"], { isRevoked: () => value as never }), messages: [] }),
+    );
+    expect(done(events).reason).toBe("principal_inactive");
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  test.each([
+    ["the human kind", { id: "a", kind: "human", parentId: "h", scopes: ["*:admin"] }],
+    ["no kind", { id: "a", parentId: "h", scopes: ["*:admin"] }],
+    ["a bad scope", { id: "a", kind: "agent_of_human", parentId: "h", scopes: ["*:root"] }],
+    ["a NaN expiry", { id: "a", kind: "agent_of_human", parentId: "h", scopes: [], expiresAt: Number.NaN }],
+  ])("a principal that skipped createPrincipal with %s is refused", async (_name, bad) => {
+    const { provider, registry } = setup([{ text: "hi" }], []);
+    await expect(collect(runAssistant({ provider, registry, principal: bad as never, messages: [] }))).rejects.toThrow(PrincipalError);
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  test("a huge tool result is cut before it reaches the model", async () => {
+    const { read, provider, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }] }, { text: "ok" }], ["notes:read"], { maxToolResultChars: 1000 });
+    read.mockResolvedValueOnce("x".repeat(100_000));
+    const events = await run();
+    const content = results(events)[0]?.content ?? "";
+    expect(content.length).toBeLessThan(1100);
+    expect(content).toContain("[truncated: 99000 characters omitted]");
+    expect(JSON.stringify(provider.requests[1]?.messages)).not.toContain("x".repeat(1001));
+  });
+
+  test("a request that would pass the token cap is not sent", async () => {
+    const { read, provider, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }] }, { text: "never" }], ["notes:read"], {
+      maxTotalTokens: 2000,
+      maxToolResultChars: 50_000,
+    });
+    read.mockResolvedValueOnce("y".repeat(40_000));
+    const events = await run();
+    expect(done(events).reason).toBe("token_cap");
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  test("tool error detail stays out of the transcript", async () => {
+    const { read, provider, run } = setup([{ toolCalls: [{ name: "notes_read", input: {} }] }, { text: "failed" }], ["notes:read"]);
+    read.mockRejectedValueOnce(new Error("connect failed postgres://app:s3cr3t@db/notes"));
+    const events = await run();
+    expect(results(events)[0]).toMatchObject({ isError: true, content: "tool failed", detail: expect.stringContaining("s3cr3t") });
+    expect(JSON.stringify(provider.requests[1]?.messages)).not.toContain("s3cr3t");
+  });
+
+  test("an abort between tool calls skips the rest", async () => {
+    const controller = new AbortController();
+    const { read, provider, registry } = setup(
+      [{ toolCalls: [{ name: "notes_read", input: { id: "a" } }, { name: "notes_read", input: { id: "b" } }] }],
+      [],
+    );
+    read.mockImplementation(async () => {
+      controller.abort();
+      return "first";
+    });
+    const events = await collect(
+      runAssistant({ provider, registry, principal: principal(["notes:read"]), messages: [], signal: controller.signal }),
+    );
+    expect(done(events).reason).toBe("aborted");
+    expect(read).toHaveBeenCalledTimes(1);
+    expectEveryToolUseAnswered(done(events).messages);
+  });
+
+  test("an abort while the model streams ends the run", async () => {
+    const controller = new AbortController();
+    const slow = {
+      name: "slow",
+      model: "slow-1",
+      async *stream(request: { signal?: AbortSignal }) {
+        controller.abort();
+        if (request.signal?.aborted) throw new Error("aborted by caller");
+        yield { type: "text_delta" as const, text: "never" };
+      },
+    };
+    const events = await collect(
+      runAssistant({ provider: slow, registry: new ToolRegistry(), principal: principal([]), messages: [], signal: controller.signal }),
+    );
+    expect(done(events).reason).toBe("aborted");
   });
 
   test.each([["max_tokens", "max_tokens"], ["refusal", "refusal"]] as const)("stop reason %s never runs its tool calls", async (stopReason, reason) => {

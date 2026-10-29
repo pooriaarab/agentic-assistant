@@ -5,7 +5,7 @@ import { VERSION } from "./version.js";
 
 const HELP = [
   `agentic-assistant ${VERSION}`,
-  "An AI assistant panel that acts inside your apps with the user's own permissions.",
+  "An AI assistant that acts inside your apps with the user's own permissions.",
   "",
   "Usage: agentic-assistant [--help] [--version]",
 ].join("\n");

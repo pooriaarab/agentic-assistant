@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   AnthropicProvider,
   OpenAICompatibleProvider,
-  ProviderError,
   ToolRegistry,
   createPrincipal,
   runAssistant,
@@ -139,10 +138,18 @@ describe("Anthropic adapter", () => {
     });
   });
 
-  test("reports a server error as an error", async () => {
+  test("a server error ends the run as provider_error", async () => {
     const { url } = await serve(() => ({ status: 400, chunks: [JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "bad" } })] }));
     const { run } = harness(new AnthropicProvider({ apiKey: "k", baseUrl: url }));
-    await expect(run()).rejects.toThrow();
+    const events = await run();
+    expect(events.at(-1)).toMatchObject({ type: "done", reason: "provider_error" });
+  });
+
+  test("calling the default US endpoint needs an explicit opt-in", () => {
+    expect(() => new AnthropicProvider({ apiKey: "k" })).toThrow(/useDefaultEndpoint/);
+    expect(() => new AnthropicProvider({ apiKey: "k", useDefaultEndpoint: true })).not.toThrow();
+    expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "https://models.example.eu" })).not.toThrow();
+    expect(() => new AnthropicProvider({ apiKey: "k", baseUrl: "http://models.example.eu" })).toThrow(/https/);
   });
 });
 
@@ -185,10 +192,10 @@ describe("OpenAI-compatible adapter", () => {
     ]);
   });
 
-  test("a response with no usage is a provider error", async () => {
+  test("a response with no usage ends the run as provider_error", async () => {
     const { url } = await serve(() => ({ chunks: [chunk({ content: "hi" }, "stop"), "data: [DONE]\n\n"] }));
     const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m" }));
-    await expect(run()).rejects.toThrow(/no token usage/);
+    expect((await run()).at(-1)).toMatchObject({ type: "done", reason: "provider_error", error: expect.stringContaining("no token usage") });
   });
 
   test("tool arguments that are not JSON never reach the handler", async () => {
@@ -204,15 +211,27 @@ describe("OpenAI-compatible adapter", () => {
     expect(events.find((e) => e.type === "tool_result")).toMatchObject({ isError: true, denied: "invalid_input" });
   });
 
-  test("a non-2xx response is a provider error", async () => {
+  test("a non-2xx response ends the run as provider_error", async () => {
     const { url } = await serve(() => ({ status: 503, chunks: ["{}"] }));
     const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m" }));
-    await expect(run()).rejects.toThrow(ProviderError);
+    expect((await run()).at(-1)).toMatchObject({ type: "done", reason: "provider_error", error: expect.stringContaining("503") });
+  });
+
+  test("a stream that never ends is cut at the size limit", async () => {
+    const { url } = await serve(() => ({ chunks: [chunk({ content: "a".repeat(60) }), chunk({ content: "b".repeat(60) }), usageChunk(1, 1)] }));
+    const { run } = harness(new OpenAICompatibleProvider({ baseUrl: url, model: "m", maxResponseChars: 100 }));
+    expect((await run()).at(-1)).toMatchObject({ reason: "provider_error", error: expect.stringContaining("size limit") });
+  });
+
+  test("a key must be non-empty, and remote hosts need one", () => {
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "https://models.example.eu/v1", model: "m", apiKey: "" })).toThrow(/apiKey/);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "https://models.example.eu/v1", model: "m" })).toThrow(/apiKey/);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://localhost:8080/v1", model: "m" })).not.toThrow();
   });
 
   test("a plain-HTTP remote URL is refused", () => {
-    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://models.example.eu/v1", model: "m" })).toThrow(/https/);
-    expect(() => new OpenAICompatibleProvider({ baseUrl: "https://models.example.eu/v1", model: "m" })).not.toThrow();
-    expect(() => new OpenAICompatibleProvider({ baseUrl: "not a url", model: "m" })).toThrow(ProviderError);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "http://models.example.eu/v1", model: "m", apiKey: "k" })).toThrow(/https/);
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "https://models.example.eu/v1", model: "m", apiKey: "k" })).not.toThrow();
+    expect(() => new OpenAICompatibleProvider({ baseUrl: "not a url", model: "m", apiKey: "k" })).toThrow(/not a URL/);
   });
 });

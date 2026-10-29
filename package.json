@@ -1,7 +1,7 @@
 {
   "name": "agentic-assistant",
   "version": "0.0.0",
-  "description": "An AI assistant panel that acts inside your apps with the user's own permissions.",
+  "description": "An AI assistant that acts inside your apps with the user's own permissions.",
   "keywords": [
     "assistant",
     "ai",
@@ -55,9 +55,7 @@
     "ci:local": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.3.0",
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.25.0"
+    "@anthropic-ai/sdk": "^1.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

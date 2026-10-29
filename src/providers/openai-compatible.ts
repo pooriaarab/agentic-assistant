@@ -1,3 +1,4 @@
+import { checkBaseUrl, isLoopback } from "./url.js";
 import {
   ProviderError,
   type ContentBlock,
@@ -13,8 +14,11 @@ export interface OpenAICompatibleOptions {
   /** Base URL that serves `/chat/completions`, for example an EU-hosted endpoint. Required. */
   baseUrl: string;
   model: string;
+  /** Required for any host except localhost. An empty key is refused. */
   apiKey?: string;
   pricing?: Pricing;
+  /** Most characters of text plus tool arguments to accept in one response. Default 4,000,000. */
+  maxResponseChars?: number;
   /** Provider name in events and errors. Default "openai-compatible". */
   name?: string;
 }
@@ -57,20 +61,6 @@ function toChatMessages(system: string | undefined, messages: readonly Message[]
   return out;
 }
 
-function checkBaseUrl(baseUrl: string): string {
-  let url: URL;
-  try {
-    url = new URL(baseUrl);
-  } catch {
-    throw new ProviderError(`baseUrl is not a URL: ${baseUrl}`);
-  }
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
-    throw new ProviderError("baseUrl must use https, except for localhost");
-  }
-  return baseUrl.replace(/\/+$/, "");
-}
-
 interface ToolCallAccumulator {
   id: string;
   name: string;
@@ -84,13 +74,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
   readonly pricing?: Pricing;
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private readonly maxResponseChars: number;
 
   constructor(options: OpenAICompatibleOptions) {
     this.name = options.name ?? "openai-compatible";
     this.model = options.model;
     this.pricing = options.pricing;
     this.apiKey = options.apiKey;
-    this.baseUrl = checkBaseUrl(options.baseUrl);
+    this.maxResponseChars = options.maxResponseChars ?? 4_000_000;
+    const { url, text } = checkBaseUrl(options.baseUrl);
+    this.baseUrl = text;
+    if (options.apiKey === "" || (options.apiKey === undefined && !isLoopback(url))) {
+      throw new ProviderError("apiKey must be a non-empty string for a remote host");
+    }
   }
 
   async *stream(request: ModelRequest): AsyncGenerator<ModelEvent> {
@@ -122,6 +118,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
 
     let text = "";
+    let received = 0;
+    const limit = this.maxResponseChars;
+    const count = (chars: number) => {
+      received += chars;
+      if (received > limit) throw new ProviderError(`${this.name} response passed the size limit of ${limit} characters`);
+    };
     const calls = new Map<number, ToolCallAccumulator>();
     let finish: string | undefined;
     let usage: { prompt_tokens?: unknown; completion_tokens?: unknown } | undefined;
@@ -146,14 +148,21 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (choice.finish_reason) finish = choice.finish_reason;
       const delta = choice.delta;
       if (typeof delta?.content === "string" && delta.content.length > 0) {
+        count(delta.content.length);
         text += delta.content;
         yield { type: "text_delta", text: delta.content };
       }
       for (const part of delta?.tool_calls ?? []) {
         const call = calls.get(part.index) ?? { id: "", name: "", args: "" };
         if (part.id) call.id = part.id;
-        if (part.function?.name) call.name += part.function.name;
-        if (part.function?.arguments) call.args += part.function.arguments;
+        if (part.function?.name) {
+          count(part.function.name.length);
+          call.name += part.function.name;
+        }
+        if (part.function?.arguments) {
+          count(part.function.arguments.length);
+          call.args += part.function.arguments;
+        }
         calls.set(part.index, call);
       }
     };
@@ -165,6 +174,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
+      if (buffer.length > limit) throw new ProviderError(`${this.name} response passed the size limit of ${limit} characters`);
       for (const line of lines) yield* handle(line.trimEnd());
     }
     if (buffer.length > 0) yield* handle(buffer.trimEnd());

@@ -1,7 +1,7 @@
 export { VERSION } from "./version.js";
 export { runAssistant } from "./loop.js";
 export type { AssistantEvent, DeniedReason, DoneReason, RunLimits, RunOptions, RunTotals } from "./loop.js";
-export { createPrincipal, actorOf, PrincipalError } from "./principal.js";
+export { createPrincipal, assertPrincipal, actorOf, PrincipalError } from "./principal.js";
 export type { Actor, AssistantPrincipal, PrincipalInput } from "./principal.js";
 export { ACTIONS, hasScope, parseScope, scopeCovers } from "./scopes.js";
 export type { Action, Scope } from "./scopes.js";
