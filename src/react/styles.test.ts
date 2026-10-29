@@ -5,9 +5,21 @@ import { describe, expect, test } from "vitest";
 // 1. A text and background pair is under 4.5:1, or a border or focus color is under 3:1 (WCAG 2.2 AA).
 // 2. A control is under the 24 px minimum target size, or has no visible focus style.
 // 3. The sheet loads a font, image, or file from another host (a CDN call).
+// 4. The sheet holds a hard-coded color, or names a token that agentic-design does not define.
+// 5. The tokens give a pair that is under the minimum in the dark theme.
 
 const css = readFileSync(new URL("./panel.css", import.meta.url), "utf8");
-const variables = Object.fromEntries([...css.matchAll(/--aa-([a-z-]+):\s*(#[0-9a-fA-F]{6});/g)].map((m) => [m[1] as string, m[2] as string]));
+const tokenCss = readFileSync(new URL("../../node_modules/agentic-design/dist/tokens.css", import.meta.url), "utf8");
+const mapping = Object.fromEntries([...css.matchAll(/--aa-([a-z-]+):\s*var\(--ad-color-([a-z-]+)\);/g)].map((m) => [m[1] as string, m[2] as string]));
+
+/** The colors in the first block of tokens.css whose selector holds `selector`. */
+function theme(selector: string): Record<string, string> {
+  const start = tokenCss.indexOf(selector);
+  const body = tokenCss.slice(tokenCss.indexOf("{", start) + 1, tokenCss.indexOf("}", start));
+  return Object.fromEntries([...body.matchAll(/--ad-color-([a-z-]+):\s*(#[0-9a-fA-F]{6});/g)].map((m) => [m[1] as string, m[2] as string]));
+}
+const themes = { light: theme(':root,\n[data-theme="light"]'), dark: theme('[data-theme="dark"]') };
+const variablesFor = (name: keyof typeof themes) => Object.fromEntries(Object.entries(mapping).map(([key, token]) => [key, themes[name][token] as string]));
 
 function luminance(hex: string): number {
   const channel = (i: number) => {
@@ -22,8 +34,12 @@ function contrast(a: string, b: string): number {
 }
 
 describe("panel styles", () => {
-  test("reads the palette", () => {
-    expect(Object.keys(variables).length).toBeGreaterThanOrEqual(12);
+  test("reads the palette from agentic-design tokens, with no hex color of its own", () => {
+    expect(Object.keys(mapping)).toHaveLength(13);
+    for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
+      for (const [key, value] of Object.entries(variablesFor(name))) expect(value, `${name} ${key}`).toMatch(/^#[0-9a-fA-F]{6}$/);
+    }
+    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
   test.each([
@@ -43,8 +59,11 @@ describe("panel styles", () => {
     ["focus", "warn-bg", 3],
     ["danger", "bg", 3],
     ["warn-fg", "bg", 3],
-  ])("%s on %s is at least %s:1", (fg, bg, minimum) => {
-    expect(contrast(variables[fg as string] as string, variables[bg as string] as string)).toBeGreaterThanOrEqual(minimum as number);
+  ])("%s on %s is at least %s:1 in light and dark", (fg, bg, minimum) => {
+    for (const name of Object.keys(themes) as (keyof typeof themes)[]) {
+      const variables = variablesFor(name);
+      expect(contrast(variables[fg as string] as string, variables[bg as string] as string), name).toBeGreaterThanOrEqual(minimum as number);
+    }
   });
 
   test("buttons meet the minimum target size, and focus is visible", () => {

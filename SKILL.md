@@ -51,7 +51,7 @@ To list tools and decide on pending calls on a running API, use `agentic-assista
 <AssistantPanel run={(messages, signal) => runAssistant({ ...options, messages, signal })} decide={(id, ok) => (ok ? gate.approve(id, userId) : gate.reject(id, userId))} />
 ```
 
-Import `agentic-assistant/react.css` too. Label every assistant part as machine-made.
+Import `agentic-design/tokens.css` and `agentic-assistant/react.css` too (the panel colors are design tokens). Label every assistant part as machine-made.
 
 ## Test without a model
 

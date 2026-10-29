@@ -106,6 +106,7 @@ An approval covers one request: the tool, the exact arguments, and the acting pr
 
 ```tsx
 import { AssistantPanel } from "agentic-assistant/react";
+import "agentic-design/tokens.css";
 import "agentic-assistant/react.css";
 
 <AssistantPanel
@@ -116,6 +117,8 @@ import "agentic-assistant/react.css";
   decide={(id, approved, reason) => (approved ? approvals.approve(id, userId) : approvals.reject(id, userId, reason))}
 />;
 ```
+
+The panel colors are `agentic-design` tokens (`--ad-color-*`), so load `agentic-design/tokens.css` once, as above. The panel then follows your light or dark theme. Without the tokens the panel has no colors. To set your own colors, override the `--aa-*` variables on `.aa-panel`.
 
 The panel streams the answer, shows each tool call as a card, and shows an approval prompt with the exact arguments. Every message, card, and prompt that the assistant makes carries a visible "Machine-made" label. Tool output is shown as text and never as HTML. The panel does not hold a model, a key, or a gate. It needs `react` 18 or newer.
 
