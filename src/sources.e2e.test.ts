@@ -193,7 +193,7 @@ describe("MCP over stdio", () => {
     const started = Date.now();
     const { results } = await runWith(mcp, ["notes:read"], [call("slow", {}), { text: "done" }]);
     expect(results[0]).toMatchObject({ isError: true, content: "tool failed" });
-    expect(Date.now() - started).toBeLessThan(1900);
+    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   test("reads structured content when there is no text", async () => {

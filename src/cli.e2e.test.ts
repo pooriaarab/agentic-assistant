@@ -324,6 +324,14 @@ describe("approving at the terminal", () => {
     expect(notes.counters.notes_write ?? 0).toBe(before);
   });
 
+  test("the question carries the label and has no control characters", async () => {
+    const questions: string[] = [];
+    const { io } = fakeIo({ isTTY: true, ask: async (q) => (questions.push(q), "n") });
+    await runCli(args([{ toolCalls: [{ name: "notes_write", input: { id: "\u009b2J\u202Ex", text: "t" } }] }, { text: "ok" }]), io);
+    expect(questions[0]).toContain("[machine-made request] Approve notes_write");
+    expect(questions[0]).not.toMatch(/[\u009b\u202e]/);
+  });
+
   test("a conversation on a terminal keeps going until exit", async () => {
     const answers = ["first question", "second question", "exit"];
     const { io, out } = fakeIo({ isTTY: true, ask: async () => answers.shift() ?? "exit" });
@@ -342,6 +350,49 @@ describe("hardening", () => {
     expect(result.stdout).toContain("hello");
     expect(result.stdout).toContain("world");
     expect(result.stderr).toContain("skipped tool evil[2Jname");
+  });
+
+  test("removes control characters from a tool name the model made up", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ toolCalls: [{ name: "\u001b]0;pwned\u0007\u001b[2J", input: {} }] }, { text: "ok" }]), "go"]));
+    expect(result.stderr + result.stdout).not.toMatch(/[\u001b\u0007]/);
+    expect(result.stderr).toContain("[machine-made] tool call:");
+  });
+
+  test("removes text direction marks and zero-width characters, and cuts between characters", async () => {
+    const result = await cli(base([...readOnly, "--script", script([read(`\u202Eetirw_seton\u200b${"😀".repeat(300)}`), { text: "ok" }]), "go"]));
+    expect(result.stderr).not.toMatch(/[\u202e\u200b]/);
+    expect(result.stderr).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
+  test("removes control characters from the error of a tool server", async () => {
+    const evil = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "\u001b]0;x\u0007boom" } }));
+      });
+    });
+    await new Promise<void>((resolve) => evil.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(evil.address() as AddressInfo).port}/mcp`;
+      const result = await cli(["chat", "--tools", url, ...readOnly, "--provider", "scripted", "--script", script([{ text: "x" }]), "go"]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("boom");
+      expect(result.stderr).not.toMatch(/[\u001b\u0007]/);
+    } finally {
+      evil.closeAllConnections();
+      evil.close();
+    }
+  });
+
+  test("a message of exactly 1,000,000 bytes is accepted", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ text: "x" }])]), { stdin: "a".repeat(1_000_000) });
+    expect(result.code).toBe(0);
+  });
+
+  test("a multibyte message over 1,000,000 bytes is refused", async () => {
+    const result = await cli(base([...readOnly, "--script", script([{ text: "x" }])]), { stdin: "é".repeat(500_001) });
+    expect(result.code).toBe(2);
   });
 
   test("--json keeps events as they are, escaped by JSON", async () => {
@@ -376,6 +427,27 @@ describe("hardening", () => {
     const result = await cli(base([...writer, "--approve-call", '{"tool":"notes_read","input":{"id":"n1","text":"x"}}', "--script", script([write("n1", "x"), { text: "ok" }]), "go"]));
     expect(result.stderr).toContain("not approved");
     expect(notes.counters.notes_write ?? 0).toBe(before);
+  });
+});
+
+describe("MCP server shutdown", () => {
+  test("a call still running when stdin closes is stopped, and the process exits at once", async () => {
+    const child = spawn(process.execPath, [CLI, "mcp", "--tools", notes.url, "--provider", "scripted", ...readOnly, "--script", script([{ toolCalls: [{ name: "slow", input: {} }] }, { text: "late" }])], {
+      env: { PATH: process.env.PATH },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "assistant_chat", arguments: { message: "be slow" } } });
+    await new Promise((resolve) => setTimeout(resolve, 1200)); // the call has reached the five-second tool
+    const started = Date.now();
+    child.stdin.end();
+    const code = await Promise.race([exited, new Promise<string>((resolve) => setTimeout(() => resolve("still running"), 4000))]);
+    if (code === "still running") child.kill();
+    expect(code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(3500);
   });
 });
 

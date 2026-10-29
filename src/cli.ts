@@ -202,15 +202,17 @@ function defaultIo(): CliIo {
 /**
  * Text from a model, a tool, or a server can hold control characters. A terminal reads them as commands
  * (clear the screen, set the title). Drop them all, except a line break and a tab. A bare carriage
- * return would let text overwrite the line, so it goes too.
+ * return would let text overwrite the line, so it goes too. Text direction marks and zero-width
+ * characters go as well: they can make an argument read differently from what runs.
  */
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/g;
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g;
 export const printable = (text: string): string => text.replace(CONTROL, "");
 
 const oneLine = (value: unknown, max = 200): string => {
   const text = printable(typeof value === "string" ? value : JSON.stringify(value) ?? "null").replace(/\s+/g, " ");
-  return text.length > max ? `${text.slice(0, max)}...` : text;
+  const points = Array.from(text); // cut between characters, never inside an emoji
+  return points.length > max ? `${points.slice(0, max).join("")}...` : text;
 };
 
 const MAX_STDIN_BYTES = 1_000_000;
@@ -233,14 +235,14 @@ function render(event: AssistantEvent, io: CliIo, state: { inText: boolean }): v
       break;
     case "tool_call":
       endText();
-      io.err(`[machine-made] tool call: ${event.name} ${oneLine(event.input)}`);
+      io.err(`[machine-made] tool call: ${oneLine(event.name, 100)} ${oneLine(event.input)}`);
       break;
     case "approval_request":
       endText();
-      io.err(`[machine-made] approval needed: ${event.request.tool} (${event.request.risk}) ${oneLine(event.request.input)}`);
+      io.err(`[machine-made] approval needed: ${oneLine(event.request.tool, 100)} (${event.request.risk}) ${oneLine(event.request.input)}`);
       break;
     case "approval_decision":
-      io.err(`approval: ${event.approved ? `approved by ${event.decidedBy ?? "unknown"}` : `not approved (${event.reason ?? "no reason"})`}`);
+      io.err(`approval: ${event.approved ? `approved by ${oneLine(event.decidedBy ?? "unknown", 100)}` : `not approved (${oneLine(event.reason ?? "no reason", 200)})`}`);
       break;
     case "tool_result":
       io.err(`tool result (${event.isError ? "error" : "ok"}${event.denied ? `, ${event.denied}` : ""}): ${oneLine(event.content)}`);
@@ -313,13 +315,14 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     }
   } catch (error) {
     if (error instanceof ConfigError || error instanceof UsageError) {
-      io.err(`${error.name}: ${error.message}`);
+      io.err(`${error.name}: ${oneLine(error.message, 500)}`);
       return 2;
     }
-    io.err(`${error instanceof Error ? error.name : "Error"}: ${error instanceof Error ? error.message : String(error)}`);
+    io.err(`${error instanceof Error ? error.name : "Error"}: ${oneLine(error instanceof Error ? error.message : String(error), 500)}`);
     return 1;
   } finally {
-    await setup?.close().catch(() => undefined);
+    // A tool server that never closes must not keep the process alive.
+    await Promise.race([setup?.close().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 5000).unref())]);
   }
 }
 
