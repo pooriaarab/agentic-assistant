@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.7
+
+- Allow supported identity and design releases below 1.0.
+
 ## 0.7.6
 
 - Support agentic-identity 0.11 while retaining support for 0.10.
