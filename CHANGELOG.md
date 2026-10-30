@@ -2,7 +2,7 @@
 
 ## 0.7.6
 
-- Support agentic-identity 0.11 while retaining support for 0.10.
+- Support agentic-identity 0.11 and 0.12 while retaining support for 0.10.
 
 ## 0.7.5
 
