@@ -308,3 +308,32 @@ AGENTIC_ASSISTANT_LIVE=1 ANTHROPIC_API_KEY=... npx vitest run src/live.smoke.tes
 ## License
 
 MIT.
+
+## Account export and erase
+
+```ts
+import { assistantAccount } from "agentic-assistant/account";
+import { createAccountRegistry } from "agentic-identity/account";
+
+const registry = createAccountRegistry().register(assistantAccount, undefined);
+const subject = { id: "ana", kind: "human" } as const;
+const data = await assistantAccount.exportAccount(subject, undefined); // {}
+const counts = await assistantAccount.eraseAccount(subject, undefined); // {}
+```
+
+The contributor implements `AccountPackage<void>` from `agentic-identity` 0.10.
+It holds no persistent account data. Both calls check the subject id and kind.
+An invalid subject stops the call. A repeat erase returns empty counts.
+
+The runtime sends messages, tool results, and machine-made provenance to the
+host. It stores no items, versions, history, sharing grants, attachments, or
+blobs. Pending approvals live in memory during a run. Stop active runs and
+cancel pending approvals before account erasure. This contributor does not stop
+runs or clear host memory.
+
+The host must register the packages that store its data. Those packages must
+export owned and authored data, delete sole-owned items, and keep other owners
+on shared items. They must handle damaged records and retries. Retained agent
+outputs must keep their machine-made labels. Empty counts here cover only this
+package; they do not confirm that the host erased the account. Credentials and
+identity audit records belong to the identity account flow.
