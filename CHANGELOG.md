@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6
+
+- Support agentic-identity 0.11 while retaining support for 0.10.
+
 ## 0.7.5
 
 - Support agentic-design 0.10 while retaining support for 0.8 and 0.9.
