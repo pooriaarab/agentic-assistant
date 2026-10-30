@@ -1,5 +1,10 @@
 # Changelog
 
+
+## 0.7.3
+
+- Support agentic-design 0.8 and 0.9 and agentic-identity 0.9 and 0.10.
+
 ## 0.7.2
 
 Patch. No change to the SDK, CLI, React panel, or HTTP shape.
