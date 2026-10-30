@@ -10,6 +10,7 @@ streams events. The assistant is always an `agent_of_human`. It never holds more
 ## Surfaces
 
 - SDK: `import { runAssistant } from "agentic-assistant"`.
+- Account contributor: `import { assistantAccount } from "agentic-assistant/account"`; register it with `createAccountRegistry()` from `agentic-identity/account`. It holds no persistent account data.
 - Test provider: `import { ScriptedProvider } from "agentic-assistant/testing"`.
 - MCP tools in: `connectMcpTools({ transport, scope })`. The host names the scope of each tool.
 - React panel: `import { AssistantPanel } from "agentic-assistant/react"`.

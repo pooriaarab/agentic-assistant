@@ -7,7 +7,7 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
+> Status: 0.7.4, early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
 
 A demo Worker runs at https://agentic-assistant-demo.hello-fd1.workers.dev. `GET /` shows a demo page and `GET /health` answers 200. The `/api/v1` routes need a bearer key, so without one they answer 401. The demo has no model key set. A signed-in `POST /api/v1/chat` answers 503 with `not_configured`. The demo never fakes an answer.
 
@@ -291,6 +291,40 @@ The record says who made the content. It does not say the content is true.
 - The token pre-check guesses three characters per token. It is an estimate.
 - A tool error text goes to the `detail` field of the event. The model sees only `tool failed`.
 - A model refusal stops the run, unless you set a fallback model. `FallbackProvider(primary, fallback)` or `--fallback-model <id>` asks the second model once when the first refuses or fails. Each `turn_end` event has `answeredBy` with the model that answered. The text of the first model is held until its turn ends, so a turn with a fallback does not stream word by word. A refusal from the fallback stops the run. The fallback gets only the output room that the first ask left, and the caps count the input of both asks, so a token or cost cap holds. A first ask that failed after it streamed is counted by an estimate. If the fallback itself fails after it streamed, the totals of that run leave out the first ask. Its error text is not kept.
+
+## Account export and erase
+
+```ts
+import { createMemoryStore, type PrincipalContext } from "agentic-identity";
+import { assistantAccount } from "agentic-assistant/account";
+import { createAccountRegistry } from "agentic-identity/account";
+
+const registry = createAccountRegistry().register(assistantAccount, undefined);
+const subject = { id: "ana", kind: "human" } as const;
+const store = createMemoryStore(); // Use the host identity store in production.
+declare const actor: PrincipalContext; // Use the signed-in actor from the host.
+const data = await registry.export(subject);
+const result = await registry.erase(subject, store, { actor });
+// data.manifest.apps is [{ id: "assistant", files: [] }].
+// result.counts.assistant is {}.
+```
+
+The contributor implements `AccountPackage<void>` from `agentic-identity` 0.10.
+It holds no persistent account data. Both calls check the subject id and kind.
+An invalid subject stops the call. A repeat erase returns empty counts.
+
+The runtime sends messages, tool results, and machine-made provenance to the
+host. It stores no items, versions, history, sharing grants, attachments, or
+blobs. Pending approvals live in memory during a run. Stop active runs and
+cancel pending approvals before account erasure. This contributor does not stop
+runs or clear host memory.
+
+The host must register the packages that store its data. Those packages must
+export owned and authored data, delete sole-owned items, and keep other owners
+on shared items. They must handle damaged records and retries. Retained agent
+outputs must keep their machine-made labels. Empty counts here cover only this
+package; they do not confirm that the host erased the account. Credentials and
+identity audit records belong to the identity account flow.
 
 ## Develop
 

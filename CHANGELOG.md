@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.4
+
+- Add `agentic-assistant/account` with a typed, stateless account contributor.
+- Require `agentic-identity` 0.10 for the account registry contract; drop 0.9 support.
+- Document the host boundary for transcripts, shared data, and agent outputs.
 
 ## 0.7.3
 

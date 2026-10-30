@@ -8,6 +8,7 @@ const pkg = JSON.parse(
 export default defineConfig({
   entry: {
     index: "src/index.ts",
+    account: "src/account.ts",
     testing: "src/testing.ts",
     cli: "src/cli.ts",
     worker: "src/worker.ts",
