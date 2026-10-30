@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5
+
+- Support agentic-design 0.10 while retaining support for 0.8 and 0.9.
+
 ## 0.7.4
 
 - Add `agentic-assistant/account` with a typed, stateless account contributor.
