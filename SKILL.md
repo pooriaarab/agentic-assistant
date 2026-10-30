@@ -53,6 +53,10 @@ To list tools and decide on pending calls on a running API, use `agentic-assista
 
 Import `agentic-design/tokens.css` and `agentic-assistant/react.css` too (the panel colors are design tokens). Label every assistant part as machine-made.
 
+## Account export and erase
+
+- Account contributor: `import { assistantAccount } from "agentic-assistant/account"`; register it with `createAccountRegistry()` from `agentic-identity/account`. It holds no persistent account data.
+
 ## Test without a model
 
 Use `ScriptedProvider` from `agentic-assistant/testing`. Give it one scripted turn per model call.

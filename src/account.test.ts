@@ -34,7 +34,7 @@ describe("assistant account boundary", () => {
     expect(result.counts.assistant).toEqual({});
   });
 
-  it("leaves sole-owned and shared host data, including AI labels, to the host", async () => {
+  it("returns machine-made run output while account records and counts stay empty", async () => {
     const events = [];
     for await (const event of runAssistant({
       provider: new ScriptedProvider([{ text: "A private answer" }]),
@@ -44,14 +44,8 @@ describe("assistant account boundary", () => {
     })) events.push(event);
     const done = events.find((e) => e.type === "done")!;
     expect(done.provenance?.generator).toBe("ai");
-    const hostRecords = [
-      { owners: ["ana"], events },
-      { owners: ["ana", "bo"], events },
-    ];
-    const before = JSON.stringify(hostRecords);
     expect(await assistantAccount.exportAccount(subject, undefined)).toEqual({});
-    await assistantAccount.eraseAccount(subject, undefined);
-    expect(JSON.stringify(hostRecords)).toBe(before);
+    expect(await assistantAccount.eraseAccount(subject, undefined)).toEqual({});
     expect(await assistantAccount.exportAccount(subject, undefined)).toEqual({});
   });
 });
