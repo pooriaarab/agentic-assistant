@@ -295,14 +295,14 @@ The record says who made the content. It does not say the content is true.
 ## Account export and erase
 
 ```ts
-import { createMemoryStore } from "agentic-identity";
+import { createMemoryStore, type PrincipalContext } from "agentic-identity";
 import { assistantAccount } from "agentic-assistant/account";
 import { createAccountRegistry } from "agentic-identity/account";
 
 const registry = createAccountRegistry().register(assistantAccount, undefined);
 const subject = { id: "ana", kind: "human" } as const;
 const store = createMemoryStore(); // Use the host identity store in production.
-const actor = null; // Anonymous audit actor; use the signed-in actor for user actions.
+declare const actor: PrincipalContext; // Use the signed-in actor from the host.
 const data = await registry.export(subject);
 const result = await registry.erase(subject, store, { actor });
 // data.manifest.apps is [{ id: "assistant", files: [] }].

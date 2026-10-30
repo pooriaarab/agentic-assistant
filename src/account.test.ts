@@ -34,7 +34,7 @@ describe("assistant account boundary", () => {
     expect(result.counts.assistant).toEqual({});
   });
 
-  it("returns machine-made run output while account records and counts stay empty", async () => {
+  it("labels run output and returns empty contributor records and counts", async () => {
     const events = [];
     for await (const event of runAssistant({
       provider: new ScriptedProvider([{ text: "A private answer" }]),

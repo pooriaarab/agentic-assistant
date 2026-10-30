@@ -8,5 +8,7 @@ describe("VERSION", () => {
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     ) as { version: string };
     expect(VERSION).toBe(pkg.version);
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    expect(readme).toContain(`> Status: ${pkg.version}, early.`);
   });
 });
