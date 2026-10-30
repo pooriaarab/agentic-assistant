@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        identity: [locked, "0.10.0"]
+        packages: [locked, minimum]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,8 +23,8 @@ jobs:
       - run: npm ci
         env:
           WRANGLER_SEND_METRICS: "false"
-      - run: npm install --no-save agentic-identity@${{ matrix.identity }}
-        if: matrix.identity != 'locked'
+      - run: npm install --no-save agentic-identity@0.10.0 agentic-design@0.8.0
+        if: matrix.packages == 'minimum'
       - run: npm run build
       - run: npm run typecheck
       - run: npm test

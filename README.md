@@ -7,7 +7,7 @@
 
 An AI assistant that acts inside your apps with the user's own permissions.
 
-> Status: 0.7.6, early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
+> Status: 0.7.7, early. The core loop, the tool sources, approvals, the React panel, the CLI, the MCP server, and the hosted HTTP API work.
 
 A demo Worker runs at https://agentic-assistant-demo.hello-fd1.workers.dev. `GET /` shows a demo page and `GET /health` answers 200. The `/api/v1` routes need a bearer key, so without one they answer 401. The demo has no model key set. A signed-in `POST /api/v1/chat` answers 503 with `not_configured`. The demo never fakes an answer.
 
